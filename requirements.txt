@@ -1,0 +1,31 @@
+# Core ML / Audio Processing
+faster-whisper==1.0.3
+pyannote.audio==3.1.1
+torch>=2.0
+torchaudio>=2.0
+transformers==4.40.0
+tokenizers==0.19.1
+sentencepiece
+
+# CRITICAL: InsightFace requires numpy < 2.0 for compatibility
+numpy<2.0
+
+# ML Utilities
+peft>=0.10.0
+scikit-learn
+insightface==0.7.3
+onnxruntime-gpu  # Use onnxruntime if no GPU available
+
+# Computer Vision
+opencv-python-headless
+
+# Video/Audio Processing
+moviepy>=1.0.3
+ffmpeg-python
+pydub
+
+# Utilities
+tqdm
+scipy
+pandas
+python-dotenv
