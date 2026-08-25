@@ -44,12 +44,12 @@ pip install -r requirements.txt
 
 ### Key Dependencies
 
-- `faster-whisper>=1.1.1`
-- `pyannote-audio>=3.3.2`
-- `torch>=2.4.0`, `torchaudio>=2.4.0`
-- `transformers>=4.44.0`, `peft>=0.12.0`, `bitsandbytes>=0.43.0`
-- `insightface>=0.7.3`, `onnxruntime-gpu>=1.19.0`
-- `numpy>=1.26.0,<2.0` (critical for InsightFace compatibility)
+- `faster-whisper==1.1.1`
+- `pyannote-audio==3.3.2`
+- `torch==2.5.1+cu121`, `torchaudio==2.5.1+cu121`
+- `transformers==4.46.3`, `peft==0.14.0`, `bitsandbytes==0.45.0`
+- `insightface==0.7.3`, `onnxruntime-gpu==1.19.2`
+- `numpy==1.26.4` (critical for InsightFace compatibility)
 - `scikit-learn`, `opencv-python-headless`, `torchaudio`
 
 ## Configuration

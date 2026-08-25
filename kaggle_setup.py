@@ -14,70 +14,73 @@ warnings.filterwarnings("ignore")
 def install_requirements():
     """Install all requirements with versions compatible with Kaggle environment."""
     requirements = """
-# Core ML Framework (let pip resolve CUDA variant; Kaggle has pre-built wheels)
-torch>=2.4.0
-torchaudio>=2.4.0
-torchvision>=0.19.0
+# Core ML Framework (use PyTorch index for CUDA wheels)
+--index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+torchaudio==2.5.1+cu121
+torchvision==0.20.1+cu121
+--index-url https://pypi.org/simple
 
 # Audio Processing
 # CRITICAL: PyPI package is 'pyannote-audio' (hyphen), NOT 'pyannote.audio' (dot)
-pyannote-audio>=3.3.2
-faster-whisper>=1.1.1
-librosa>=0.10.2
+pyannote-audio==3.3.2
+faster-whisper==1.1.1
+librosa==0.10.2
 
 # Transformers & NLP
-transformers>=4.44.0
-huggingface-hub>=0.25.0
-tokenizers>=0.19.0
-accelerate>=0.33.0
-sentencepiece>=0.2.0
+transformers==4.46.3
+huggingface-hub==0.26.2
+tokenizers==0.21.1
+accelerate==0.34.2
+sentencepiece==0.2.0
 
 # Vision (InsightFace requires numpy<2.0)
-insightface>=0.7.3
-opencv-python-headless>=4.10.0
-scikit-learn>=1.5.0
-scikit-image>=0.24.0
+insightface==0.7.3
+opencv-python-headless==4.10.0.84
+scikit-learn==1.5.2
+scikit-image==0.24.0
 
 # Face Analysis Dependencies
-onnxruntime-gpu>=1.19.0
+# onnxruntime-gpu only available on Linux; use onnxruntime on other platforms
+onnxruntime-gpu==1.19.2
 
 # Clustering & Metrics (numpy<2.0 CRITICAL for InsightFace compatibility)
-scipy>=1.13.0
-numpy>=1.26.0,<2.0
+scipy==1.13.1
+numpy==1.26.4
 
 # Data Processing
-pandas>=2.2.0
-tqdm>=4.66.0
-pyyaml>=6.0.0
+pandas==2.2.3
+tqdm==4.67.1
+pyyaml==6.0.1
 
 # Utilities
-ffmpeg-python>=0.2.0
-requests>=2.32.0
-python-dotenv>=1.0.0
+ffmpeg-python==0.2.0
+requests==2.32.3
+python-dotenv==1.0.1
 
 # LoRA / PEFT (QLoRA 4-bit quantization needs bitsandbytes)
-peft>=0.12.0
-bitsandbytes>=0.43.0
+peft==0.14.0
+bitsandbytes==0.45.0
 
 # Protobuf compatibility (required by Google Cloud libs, transformers)
-protobuf>=5.29.0
+protobuf==5.29.3
 
 # FSSpec compatibility
-fsspec>=2024.0.0
+fsspec==2024.12.0
 
 # Rich for progress bars
-rich>=13.9.0
+rich==13.9.4
 
-# Jupyter/Notebook
-ipykernel>=6.29.0
-jupyter-client>=8.6.0
+# Jupyter/Notebook (for Kaggle/Colab execution)
+ipykernel==6.29.5
+jupyter-client==8.6.3
 
 # Download utilities
-yt-dlp>=2024.8.0
+yt-dlp==2024.12.18
 
 # Evaluation
-jiwer>=3.0.0
-pyannote.metrics>=3.3.0
+jiwer==3.0.4
+pyannote.metrics==3.3.2
 """
     
     # Write requirements to file
