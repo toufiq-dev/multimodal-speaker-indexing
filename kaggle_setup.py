@@ -14,68 +14,70 @@ warnings.filterwarnings("ignore")
 def install_requirements():
     """Install all requirements with versions compatible with Kaggle environment."""
     requirements = """
-# Core ML Framework (CUDA 12.1)
-torch==2.3.1+cu121
-torchaudio==2.3.1+cu121
-torchvision==0.18.1+cu121
---index-url https://download.pytorch.org/whl/cu121
+# Core ML Framework (let pip resolve CUDA variant; Kaggle has pre-built wheels)
+torch>=2.4.0
+torchaudio>=2.4.0
+torchvision>=0.19.0
 
 # Audio Processing
-pyannote.audio==3.3.2
-faster-whisper==1.1.1
-librosa==0.10.2.post1
+# CRITICAL: PyPI package is 'pyannote-audio' (hyphen), NOT 'pyannote.audio' (dot)
+pyannote-audio>=3.3.2
+faster-whisper>=1.1.1
+librosa>=0.10.2
 
 # Transformers & NLP
-transformers==4.44.0
-huggingface-hub==0.25.2
-tokenizers==0.19.1
-accelerate==0.33.0
-sentencepiece==0.2.0
+transformers>=4.44.0
+huggingface-hub>=0.25.0
+tokenizers>=0.19.0
+accelerate>=0.33.0
+sentencepiece>=0.2.0
 
-# Vision
-insightface==0.7.3
-opencv-python-headless==4.10.0.84
-scikit-learn==1.5.1
-scikit-image==0.24.0
+# Vision (InsightFace requires numpy<2.0)
+insightface>=0.7.3
+opencv-python-headless>=4.10.0
+scikit-learn>=1.5.0
+scikit-image>=0.24.0
 
 # Face Analysis Dependencies
-onnxruntime-gpu==1.19.2
+onnxruntime-gpu>=1.19.0
 
-# Clustering & Metrics
-scipy==1.13.1
-numpy==1.26.4
+# Clustering & Metrics (numpy<2.0 CRITICAL for InsightFace compatibility)
+scipy>=1.13.0
+numpy>=1.26.0,<2.0
 
 # Data Processing
-pandas==2.2.2
-tqdm==4.66.4
-pyyaml==6.0.1
+pandas>=2.2.0
+tqdm>=4.66.0
+pyyaml>=6.0.0
 
 # Utilities
-ffmpeg-python==0.2.0
-requests==2.32.3
-python-dotenv==1.0.1
+ffmpeg-python>=0.2.0
+requests>=2.32.0
+python-dotenv>=1.0.0
 
-# LoRA / PEFT
-peft==0.12.0
+# LoRA / PEFT (QLoRA 4-bit quantization needs bitsandbytes)
+peft>=0.12.0
+bitsandbytes>=0.43.0
 
-# Protobuf compatibility (critical)
-protobuf==5.29.3
+# Protobuf compatibility (required by Google Cloud libs, transformers)
+protobuf>=5.29.0
 
 # FSSpec compatibility
-fsspec==2025.3.0
+fsspec>=2024.0.0
 
 # Rich for progress bars
-rich==13.9.4
+rich>=13.9.0
 
 # Jupyter/Notebook
-ipykernel==6.29.5
-jupyter-client==8.6.2
+ipykernel>=6.29.0
+jupyter-client>=8.6.0
 
 # Download utilities
-yt-dlp==2024.8.6
+yt-dlp>=2024.8.0
 
 # Evaluation
-jiwer==3.0.4
+jiwer>=3.0.0
+pyannote.metrics>=3.3.0
 """
     
     # Write requirements to file

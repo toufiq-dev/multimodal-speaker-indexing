@@ -7,7 +7,7 @@ A language-agnostic framework for **speaker identity resolution** in multi-speak
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **ASR** | faster-whisper / Whisper-LoRA | Word/segment-level transcription |
-| **Diarization** | pyannote.audio 3.1 | Speaker turn segmentation |
+| **Diarization** | pyannote-audio 3.1+ | Speaker turn segmentation |
 | **Face Recognition** | InsightFace (RetinaFace + ArcFace) | Face detection, embedding, tracking |
 | **Lip-Sync** | Mouth region pixel diff | Audio-visual synchronization score |
 | **NER** | BanglaBERT / mBERT-Bengali | Speaker name extraction from intro |
@@ -40,19 +40,16 @@ cd multimodal-speaker-indexing
 
 # Install dependencies (requires Python 3.10+, CUDA 11.8+ for GPU)
 pip install -r requirements.txt
-
-# For GPU: ensure bitsandbytes compiles correctly
-pip install bitsandbytes==0.43.0
 ```
 
 ### Key Dependencies
 
-- `faster-whisper==1.0.3`
-- `pyannote.audio==3.1.1`
-- `torch>=2.0`, `torchaudio>=2.0`
-- `transformers==4.40.0`, `peft>=0.10.0`, `bitsandbytes>=0.43.0`
-- `insightface==0.7.3`, `onnxruntime-gpu`
-- `numpy<2.0` (critical for InsightFace compatibility)
+- `faster-whisper>=1.1.1`
+- `pyannote-audio>=3.3.2`
+- `torch>=2.4.0`, `torchaudio>=2.4.0`
+- `transformers>=4.44.0`, `peft>=0.12.0`, `bitsandbytes>=0.43.0`
+- `insightface>=0.7.3`, `onnxruntime-gpu>=1.19.0`
+- `numpy>=1.26.0,<2.0` (critical for InsightFace compatibility)
 - `scikit-learn`, `opencv-python-headless`, `torchaudio`
 
 ## Configuration
