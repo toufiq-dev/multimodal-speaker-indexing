@@ -12,6 +12,7 @@ numpy<2.0
 
 # ML Utilities
 peft>=0.10.0
+bitsandbytes>=0.43.0
 scikit-learn
 insightface==0.7.3
 onnxruntime-gpu  # Use onnxruntime if no GPU available

@@ -28,8 +28,8 @@ def _load_pipeline() -> Pipeline:
             token=config.HF_TOKEN,
         )
 
-    if config.DEVICE != "cpu":
-        pipeline.to(torch.device(config.DEVICE))
+    if config.DEVICE == "cuda":
+        pipeline.to(torch.device("cuda"))
 
     return pipeline
 

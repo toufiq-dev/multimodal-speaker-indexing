@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import list
+from typing import List, Optional
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class TranscribedSegment:
     start: float
     end: float
     text: str
-    words: list[WordToken]
+    words: List[WordToken]
     speaker_id: str = "UNKNOWN"
 
 
@@ -39,6 +40,9 @@ class FaceOccurrence:
     box: tuple[int, int, int, int]  # (x1, y1, x2, y2)
     track_id: int
     resolved_face_id: str = "UNKNOWN"
+    face_confidence: float = 0.0
+    lip_sync_score: float = 0.0
+    embedding: Optional[np.ndarray] = None
 
 
 @dataclass(frozen=True)

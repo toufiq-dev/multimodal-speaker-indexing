@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import torch
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from faster_whisper import WhisperModel
 
@@ -31,7 +31,7 @@ def _clean_text(text: str) -> str:
     """Apply regex cleaning patterns from config."""
     cleaned = text
     for pattern in config.REGEX_FILTER_PATTERNS:
-        cleaned = re.sub(pattern, r"\1" if "(" in pattern else "", cleaned)
+        cleaned = re.sub(pattern, "", cleaned)
     return cleaned.strip()
 
 
@@ -72,12 +72,16 @@ def _assign_speaker_to_word(
     return best_speaker
 
 
-def transcribe_audio(audio_path: str) -> Tuple[List[WordToken], str]:
+def transcribe_audio(
+    audio_path: str,
+    model: Optional[WhisperModel] = None,
+) -> Tuple[List[WordToken], str]:
     """
     Transcribe audio with word-level timestamps.
 
     Args:
         audio_path: Path to input WAV audio file.
+        model: Optional pre-loaded WhisperModel. If None, loads internally.
 
     Returns:
         Tuple of (list of WordToken, full_text).
@@ -86,14 +90,22 @@ def transcribe_audio(audio_path: str) -> Tuple[List[WordToken], str]:
     if not audio.exists():
         raise FileNotFoundError(f"Audio file not found: {audio}")
 
-    model = _load_model()
+    local_model = model or _load_model()
 
-    segments, _ = model.transcribe(
-        str(audio),
-        word_timestamps=True,
-        vad_filter=True,
-        language="bn",
-    )
+    try:
+        segments, _ = local_model.transcribe(
+            str(audio),
+            word_timestamps=True,
+            vad_filter=True,
+            language="bn",
+        )
+    except Exception:
+        segments, _ = local_model.transcribe(
+            str(audio),
+            word_timestamps=True,
+            vad_filter=True,
+            language=None,
+        )
 
     words: List[WordToken] = []
     full_text_parts = []
@@ -111,7 +123,8 @@ def transcribe_audio(audio_path: str) -> Tuple[List[WordToken], str]:
 
     full_text = " ".join(full_text_parts).strip()
 
-    torch.cuda.empty_cache()
+    if model is None:
+        torch.cuda.empty_cache()
     return words, full_text
 
 
@@ -129,16 +142,16 @@ def align_transcription_with_diarization(
     Returns:
         List of TranscribedSegment with speaker assignments.
     """
-    words, _ = transcribe_audio(audio_path)
+    model = _load_model()
+    words, _ = transcribe_audio(audio_path, model=model)
 
     if not words:
+        torch.cuda.empty_cache()
         return []
 
-    # Assign speaker to each word
     for word in words:
         word.speaker_id = _assign_speaker_to_word(word.start, word.end, diarization)
 
-    # Group consecutive same-speaker words into segments
     segments: List[TranscribedSegment] = []
     current_words: List[WordToken] = []
     current_speaker = words[0].speaker_id
