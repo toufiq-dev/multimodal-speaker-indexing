@@ -1,0 +1,59 @@
+# Data directories
+data/input/
+data/output/
+data/registry/
+
+# Media files
+*.mp4
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.mp3
+*.m4a
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Model checkpoints
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Kaggle
+kaggle.json
+*.kaggle
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Distribution
+dist/
+build/
+*.egg-info/
