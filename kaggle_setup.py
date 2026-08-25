@@ -8,49 +8,78 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ============================================================================
-# 1. INSTALL DEPENDENCIES WITH COMPATIBLE VERSIONS
+# 1. INSTALL PYTORCH (CUDA 12.1) - Must use explicit index
+# ============================================================================
+
+def install_pytorch():
+    """Install PyTorch with CUDA 12.1 from PyTorch index."""
+    print("Installing PyTorch with CUDA 12.1...")
+    result = subprocess.run([
+        sys.executable, "-m", "pip", "install",
+        "--index-url", "https://download.pytorch.org/whl/cu121",
+        "torch==2.5.1+cu121",
+        "torchaudio==2.5.1+cu121",
+        "torchvision==0.20.1+cu121"
+    ], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"❌ PyTorch install failed:\n{result.stderr[-3000:]}")
+        raise RuntimeError("PyTorch installation failed")
+    print("✅ PyTorch installed")
+
+# ============================================================================
+# 2. INSTALL NUMPY FIRST - Locks ABI for binary wheels
+# ============================================================================
+
+def install_numpy():
+    """Install numpy==1.26.4 first to lock ABI for binary wheels (insightface, onnxruntime, etc.)"""
+    print("Installing numpy==1.26.4 (must be first)...")
+    result = subprocess.run([
+        sys.executable, "-m", "pip", "install", "numpy==1.26.4"
+    ], capture_output=True, text=True)
+
+    if result.returncode != 0:
+        print(f"❌ NumPy install failed:\n{result.stderr[-3000:]}")
+        raise RuntimeError("NumPy installation failed")
+    print("✅ NumPy installed")
+
+# ============================================================================
+# 3. INSTALL REMAINING REQUIREMENTS
 # ============================================================================
 
 def install_requirements():
     """Install all requirements with versions compatible with Kaggle environment."""
     requirements = """
-# Core ML Framework (use PyTorch index for CUDA wheels)
---index-url https://download.pytorch.org/whl/cu121
-torch==2.5.1+cu121
-torchaudio==2.5.1+cu121
-torchvision==0.20.1+cu121
---index-url https://pypi.org/simple
-
 # Audio Processing
 # CRITICAL: PyPI package is 'pyannote-audio' (hyphen), NOT 'pyannote.audio' (dot)
 pyannote-audio==3.3.2
 faster-whisper==1.1.1
-librosa==0.10.2
+librosa==0.10.2.post1
 
 # Transformers & NLP
-transformers==4.46.3
-huggingface-hub==0.26.2
-tokenizers==0.21.1
-accelerate==0.34.2
+transformers==4.44.0
+huggingface-hub==0.25.2
+tokenizers==0.19.1
+accelerate==0.33.0
 sentencepiece==0.2.0
 
 # Vision (InsightFace requires numpy<2.0)
 insightface==0.7.3
 opencv-python-headless==4.10.0.84
-scikit-learn==1.5.2
+scikit-learn==1.5.1
 scikit-image==0.24.0
 
 # Face Analysis Dependencies
 # onnxruntime-gpu only available on Linux; use onnxruntime on other platforms
 onnxruntime-gpu==1.19.2
 
-# Clustering & Metrics (numpy<2.0 CRITICAL for InsightFace compatibility)
+# Clustering & Metrics (numpy==1.26.4 CRITICAL for InsightFace compatibility)
 scipy==1.13.1
 numpy==1.26.4
 
 # Data Processing
-pandas==2.2.3
-tqdm==4.67.1
+pandas==2.2.2
+tqdm==4.66.4
 pyyaml==6.0.1
 
 # Utilities
@@ -59,28 +88,28 @@ requests==2.32.3
 python-dotenv==1.0.1
 
 # LoRA / PEFT (QLoRA 4-bit quantization needs bitsandbytes)
-peft==0.14.0
-bitsandbytes==0.45.0
+peft==0.12.0
+bitsandbytes==0.43.0
 
 # Protobuf compatibility (required by Google Cloud libs, transformers)
 protobuf==5.29.3
 
 # FSSpec compatibility
-fsspec==2024.12.0
+fsspec==2025.3.0
 
 # Rich for progress bars
 rich==13.9.4
 
 # Jupyter/Notebook (for Kaggle/Colab execution)
 ipykernel==6.29.5
-jupyter-client==8.6.3
+jupyter-client==8.6.2
 
 # Download utilities
-yt-dlp==2024.12.18
+yt-dlp==2026.8.19
 
 # Evaluation
 jiwer==3.0.4
-pyannote.metrics==3.3.2
+pyannote.metrics==3.2.1
 """
     
     # Write requirements to file
@@ -88,22 +117,46 @@ pyannote.metrics==3.3.2
         f.write(requirements.strip())
     
     # Install with pip
-    print("Installing requirements...")
+    print("Installing remaining requirements...")
     result = subprocess.run([
-        sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"
+        sys.executable, "-m", "pip", "install", "-r", "requirements.txt"
     ], capture_output=True, text=True)
     
     if result.returncode != 0:
-        print(f"Warning: Some packages may have failed to install:")
-        print(result.stderr[-2000:])
+        print(f"❌ Install failed:\n{result.stderr[-3000:]}")
+        raise RuntimeError("Requirements installation failed")
     else:
         print("✅ Requirements installed successfully")
 
-# Run installation
+# Run installation in correct order
+install_pytorch()
+install_numpy()
 install_requirements()
 
 # ============================================================================
-# 2. FIX NUMPY COMPATIBILITY (Runtime Patch)
+# 4. VERIFY NUMPY VERSION - CRITICAL FOR BINARY WHEEL COMPATIBILITY
+# ============================================================================
+
+import numpy as np
+print(f"\nCurrent numpy version: {np.__version__}")
+
+if not np.__version__.startswith("1.26"):
+    print("⚠️ Wrong numpy version! Expected 1.26.x")
+    print("Reinstalling numpy==1.26.4 with --force-reinstall...")
+    result = subprocess.run([
+        sys.executable, "-m", "pip", "install", "--force-reinstall", "numpy==1.26.4"
+    ], capture_output=True, text=True)
+    if result.returncode == 0:
+        print("✅ NumPy reinstalled successfully")
+        print("🔴 RESTART KERNEL NOW (Runtime → Restart session) then re-run")
+    else:
+        print(f"❌ Failed: {result.stderr}")
+else:
+    print("✅ NumPy version OK (1.26.x)")
+    print("✅ Binary wheel ABI compatibility confirmed")
+
+# ============================================================================
+# 5. FIX NUMPY COMPATIBILITY (Runtime Patch)
 # ============================================================================
 
 import numpy as np
@@ -119,7 +172,7 @@ if not hasattr(np, "NINF"):
 print("✅ NumPy compatibility patch applied")
 
 # ============================================================================
-# 3. SETUP HUGGING FACE TOKEN
+# 6. SETUP HUGGING FACE TOKEN
 # ============================================================================
 
 def setup_hf_token():
@@ -136,8 +189,18 @@ def setup_hf_token():
 
 setup_hf_token()
 
+# Login to Hugging Face CLI (required for pyannote models)
+if os.environ.get("HF_TOKEN"):
+    result = subprocess.run([
+        "huggingface-cli", "login", "--token", os.environ["HF_TOKEN"], "--add-to-git-credential"
+    ], capture_output=True, text=True)
+    if result.returncode == 0:
+        print("✅ Hugging Face CLI login successful")
+    else:
+        print(f"⚠️ HF CLI login warning: {result.stderr.strip()}")
+
 # ============================================================================
-# 4. VERIFY GPU AVAILABILITY
+# 7. VERIFY GPU AVAILABILITY
 # ============================================================================
 
 import torch
@@ -145,13 +208,13 @@ print("\n--- Hardware Verification ---")
 print(f"CUDA available: {torch.cuda.is_available()}")
 if torch.cuda.is_available():
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"VRAM: {torch.cuda.get_device_properties(0).total_mem / 1e9:.1f} GB")
+    print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
     print(f"PyTorch CUDA version: {torch.version.cuda}")
 else:
-    print("⚠️ No GPU detected. Enable GPU in Kaggle session settings (Settings → Accelerator → GPU)")
+    print("⚠️ No GPU detected. Enable GPU in Kaggle session settings (Settings → Accelerator → GPU T4 x2)")
 
 # ============================================================================
-# 5. CLONE REPOSITORY & SETUP PATHS
+# 8. CLONE REPOSITORY & SETUP PATHS
 # ============================================================================
 
 def setup_repository():
@@ -183,7 +246,7 @@ def setup_repository():
 setup_repository()
 
 # ============================================================================
-# 6. CREATE DATA DIRECTORIES
+# 9. CREATE DATA DIRECTORIES
 # ============================================================================
 
 def create_directories():
@@ -205,7 +268,7 @@ def create_directories():
 create_directories()
 
 # ============================================================================
-# 7. DOWNLOAD DATASET (Jamuna TV Rajniti Talk Show)
+# 10. DOWNLOAD DATASET (Jamuna TV Rajniti Talk Show)
 # ============================================================================
 
 def download_dataset():
@@ -254,7 +317,7 @@ def download_dataset():
 video_path = download_dataset()
 
 # ============================================================================
-# 8. VERIFY IMPORTS WORK
+# 11. VERIFY IMPORTS WORK
 # ============================================================================
 
 def verify_imports():
@@ -270,7 +333,7 @@ def verify_imports():
         ("engines.asr_lora", "engines.asr_lora"),
         ("engines.nlp", "engines.nlp"),
         ("engines.fusion", "engines.fusion"),
-        ("engines", "engines"),  # This tests lazy loading of vision
+        # REMOVED: ("engines", "engines") - triggers lazy vision load
     ]
     
     for name, module in modules_to_test:
@@ -287,7 +350,7 @@ def verify_imports():
 verify_imports()
 
 # ============================================================================
-# 9. PRINT USAGE INSTRUCTIONS
+# 12. PRINT USAGE INSTRUCTIONS
 # ============================================================================
 
 print("""

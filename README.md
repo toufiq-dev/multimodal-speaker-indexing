@@ -39,18 +39,32 @@ git clone https://github.com/toufiq-dev/multimodal-speaker-indexing.git
 cd multimodal-speaker-indexing
 
 # Install dependencies (requires Python 3.10+, CUDA 11.8+ for GPU)
+# IMPORTANT: Install in this order for binary wheel compatibility:
+# 1. PyTorch with CUDA (from PyTorch index)
+pip install --index-url https://download.pytorch.org/whl/cu121 torch==2.5.1+cu121 torchaudio==2.5.1+cu121 torchvision==0.20.1+cu121
+
+# 2. NumPy FIRST (locks ABI for insightface, onnxruntime-gpu, tokenizers)
+pip install numpy==1.26.4
+
+# 3. Remaining requirements
 pip install -r requirements.txt
 ```
+
+### Kaggle / Colab
+
+Use the provided `kaggle_notebook.ipynb` or `kaggle_setup.py` which handle install order automatically.
 
 ### Key Dependencies
 
 - `faster-whisper==1.1.1`
 - `pyannote-audio==3.3.2`
-- `torch==2.5.1+cu121`, `torchaudio==2.5.1+cu121`
-- `transformers==4.46.3`, `peft==0.14.0`, `bitsandbytes==0.45.0`
+- `torch==2.5.1+cu121`, `torchaudio==2.5.1+cu121`, `torchvision==0.20.1+cu121`
+- `transformers==4.44.0`, `huggingface-hub==0.25.2`, `accelerate==0.33.0`
+- `peft==0.12.0`, `bitsandbytes==0.43.0`
 - `insightface==0.7.3`, `onnxruntime-gpu==1.19.2`
-- `numpy==1.26.4` (critical for InsightFace compatibility)
-- `scikit-learn`, `opencv-python-headless`, `torchaudio`
+- `numpy==1.26.4` (critical for InsightFace compatibility - install FIRST)
+- `scikit-learn==1.5.1`, `opencv-python-headless==4.10.0.84`, `scikit-image==0.24.0`
+- `scipy==1.13.1`, `pandas==2.2.2`, `tqdm==4.66.4`, `pyyaml==6.0.1`
 
 ## Configuration
 
