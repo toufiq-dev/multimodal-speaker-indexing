@@ -9,11 +9,8 @@ from typing import List, Tuple, Optional
 
 from faster_whisper import WhisperModel
 
-from config import Config
+from config import config
 from models import DiarizationSegment, TranscribedSegment, WordToken
-
-
-config = Config()
 
 
 def _load_model() -> WhisperModel:

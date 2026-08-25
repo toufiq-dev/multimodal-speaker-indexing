@@ -11,11 +11,8 @@ from typing import List, Optional, Tuple
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from peft import PeftModel
 
-from config import Config
+from config import config
 from models import DiarizationSegment, TranscribedSegment
-
-
-config = Config()
 
 
 # Chunking constants

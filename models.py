@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional
 import numpy as np
 
 
-@dataclass(frozen=True)
+@dataclass
 class DiarizationSegment:
     """Represents a speaker diarization segment from pyannote.audio."""
     start: float
@@ -15,15 +15,16 @@ class DiarizationSegment:
     speaker_id: str
 
 
-@dataclass(frozen=True)
+@dataclass
 class WordToken:
     """Represents a single word with timestamp information from Whisper."""
     word: str
     start: float
     end: float
+    speaker_id: str = "UNKNOWN"
 
 
-@dataclass(frozen=True)
+@dataclass
 class TranscribedSegment:
     """Represents a transcribed segment with word-level timestamps and speaker ID."""
     start: float
@@ -33,7 +34,7 @@ class TranscribedSegment:
     speaker_id: str = "UNKNOWN"
 
 
-@dataclass(frozen=True)
+@dataclass
 class FaceOccurrence:
     """Represents a detected face occurrence in a video frame."""
     frame_time: float
@@ -45,7 +46,7 @@ class FaceOccurrence:
     embedding: Optional[np.ndarray] = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class FinalSegment:
     """Represents the final merged segment with speaker, text, and confidence."""
     start: float

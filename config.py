@@ -9,6 +9,26 @@ from pathlib import Path
 import torch
 
 
+def _auto_device() -> str:
+    """Auto-detect the best available device for PyTorch."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def _resolve_base_dir() -> Path:
+    """Resolve base directory based on execution environment."""
+    # Check for Kaggle environment
+    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or os.environ.get("KAGGLE_URL_BASE"):
+        return Path("/kaggle/working")
+    # Check for Colab
+    if os.environ.get("COLAB_RELEASE_TAG"):
+        return Path("/content")
+    return Path("./data")
+
+
 @dataclass
 class Config:
     """Application configuration with environment-based overrides and auto-detection."""
@@ -53,17 +73,5 @@ class Config:
         return self.BANGLABERT_NER_MODEL
 
 
-def _auto_device() -> str:
-    """Auto-detect the best available device for PyTorch."""
-    if torch.cuda.is_available():
-        return "cuda"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-def _resolve_base_dir() -> Path:
-    """Resolve base directory based on execution environment."""
-    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
-        return Path("/kaggle/working")
-    return Path("./data")
+# Global config instance
+config = Config()

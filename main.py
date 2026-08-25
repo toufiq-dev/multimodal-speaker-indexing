@@ -11,7 +11,7 @@ from typing import List, Optional
 
 import torch
 
-from config import Config
+from config import config
 from models import FinalSegment
 from engines.media import extract_audio, extract_frames
 from engines.diarization import run_diarization
@@ -20,9 +20,6 @@ from engines.asr_lora import load_lora_whisper, transcribe_with_lora
 from engines.vision import run_vision_pipeline
 from engines.nlp import extract_speaker_names_from_intro
 from engines.fusion import run_fusion_pipeline
-
-
-config = Config()
 
 
 def _get_video_duration(video_path: str) -> float:

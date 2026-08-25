@@ -7,10 +7,7 @@ import shutil
 from pathlib import Path
 from typing import List
 
-from config import Config
-
-
-config = Config()
+from config import config
 
 
 def _ensure_dir(path: Path) -> None:

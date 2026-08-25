@@ -1,32 +1,64 @@
-# Core ML / Audio Processing
-faster-whisper==1.0.3
-pyannote.audio==3.1.1
-torch>=2.0
-torchaudio>=2.0
-transformers==4.40.0
+# Core ML Framework
+torch==2.3.1+cu121
+torchaudio==2.3.1+cu121
+torchvision==0.18.1+cu121
+--index-url https://download.pytorch.org/whl/cu121
+
+# Audio Processing
+pyannote.audio==3.3.2
+faster-whisper==1.1.1
+librosa==0.10.2.post1
+
+# Transformers & NLP
+transformers==4.44.0
+huggingface-hub==0.25.2
 tokenizers==0.19.1
-sentencepiece
+accelerate==0.33.0
+sentencepiece==0.2.0
 
-# CRITICAL: InsightFace requires numpy < 2.0 for compatibility
-numpy<2.0
-
-# ML Utilities
-peft>=0.10.0
-bitsandbytes>=0.43.0
-scikit-learn
+# Vision
 insightface==0.7.3
-onnxruntime-gpu  # Use onnxruntime if no GPU available
+opencv-python-headless==4.10.0.84
+scikit-learn==1.5.1
+scikit-image==0.24.0
 
-# Computer Vision
-opencv-python-headless
+# Face Analysis Dependencies
+onnxruntime-gpu==1.19.2
 
-# Video/Audio Processing
-moviepy>=1.0.3
-ffmpeg-python
-pydub
+# Clustering & Metrics
+scipy==1.13.1
+numpy==1.26.4
+
+# Data Processing
+pandas==2.2.2
+tqdm==4.66.4
+pyyaml==6.0.1
 
 # Utilities
-tqdm
-scipy
-pandas
-python-dotenv
+ffmpeg-python==0.2.0
+requests==2.32.3
+python-dotenv==1.0.1
+
+# LoRA / PEFT
+peft==0.12.0
+bitsandbytes==0.43.0
+
+# Protobuf compatibility (critical for Google Cloud libraries)
+protobuf==5.29.3
+
+# FSSpec compatibility
+fsspec==2025.3.0
+
+# Rich for progress bars (compatible with pyiceberg)
+rich==13.9.4
+
+# Jupyter/Notebook
+ipykernel==6.29.5
+jupyter-client==8.6.2
+
+# Download utilities
+yt-dlp==2024.8.6
+
+# Evaluation
+jiwer==3.0.4
+pyannote.metrics==3.3.2

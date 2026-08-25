@@ -12,12 +12,9 @@ import numpy as np
 from insightface.app import FaceAnalysis
 from sklearn.cluster import DBSCAN
 
-from config import Config
+from config import config
 from models import FaceOccurrence
 from engines.media import extract_frames
-
-
-config = Config()
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:

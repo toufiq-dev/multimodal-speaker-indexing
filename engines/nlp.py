@@ -8,11 +8,8 @@ from typing import List, Tuple, Optional
 import torch
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 
-from config import Config
+from config import config
 from models import TranscribedSegment
-
-
-config = Config()
 
 
 BENGALI_TITLES = {

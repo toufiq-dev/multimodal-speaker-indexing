@@ -7,16 +7,13 @@ import torch.nn as nn
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
-from config import Config
+from config import config
 from models import (
     DiarizationSegment,
     TranscribedSegment,
     FaceOccurrence,
     FinalSegment,
 )
-
-
-config = Config()
 
 
 class GatingNetwork(nn.Module):

@@ -2,33 +2,42 @@
 
 from __future__ import annotations
 
+import os
 import torch
 from pathlib import Path
 from typing import List
 
 from pyannote.audio import Pipeline
 
-from config import Config
+from config import config
 from models import DiarizationSegment
 
 
-config = Config()
-
-
 def _load_pipeline() -> Pipeline:
-    """Load pyannote diarization pipeline with HF token."""
+    """Load pyannote diarization pipeline with HF token (handles API version differences)."""
+    hf_token = config.HF_TOKEN or os.getenv("HF_TOKEN", "")
+    
     try:
         pipeline = Pipeline.from_pretrained(
             config.PYANNOTE_MODEL,
-            use_auth_token=config.HF_TOKEN,
+            use_auth_token=hf_token if hf_token else None,
         )
-    except TypeError:
-        pipeline = Pipeline.from_pretrained(
-            config.PYANNOTE_MODEL,
-            token=config.HF_TOKEN,
-        )
+    except TypeError as e:
+        if "use_auth_token" in str(e):
+            try:
+                pipeline = Pipeline.from_pretrained(
+                    config.PYANNOTE_MODEL,
+                    token=hf_token if hf_token else None,
+                )
+            except TypeError as e2:
+                if "token" in str(e2):
+                    pipeline = Pipeline.from_pretrained(config.PYANNOTE_MODEL)
+                else:
+                    raise
+        else:
+            raise
 
-    if config.DEVICE == "cuda":
+    if config.DEVICE == "cuda" and torch.cuda.is_available():
         pipeline.to(torch.device("cuda"))
 
     return pipeline
