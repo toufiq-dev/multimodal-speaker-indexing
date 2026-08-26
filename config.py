@@ -35,8 +35,10 @@ class Config:
 
     HF_TOKEN: str = field(default_factory=lambda: os.getenv("HF_TOKEN", ""))
     DEVICE: str = field(default_factory=lambda: _auto_device())
-    WHISPER_MODEL: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL", "large-v3"))
+    WHISPER_MODEL: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL", "bengaliAI/tugstugi_bengaliai-asr_whisper-medium"))
     PYANNOTE_MODEL: str = "pyannote/speaker-diarization-3.1"
+    USE_LORA: bool = False
+    LORA_PATH: str = ""
     BANGLABERT_NER_MODEL: str = "sagorsarker/banglabert-ner"
     BANGLABERT_NER_FALLBACK: str = "sagorsarker/mbert-bengali-ner"
     FACE_SIM_THRESHOLD: float = 0.65
