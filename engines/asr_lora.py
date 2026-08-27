@@ -33,6 +33,24 @@ _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|]*\|>")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
+def _restore_bengali_punct(text: str) -> str:
+    """Lightweight Bengali punctuation restoration (regex heuristic, zero-dep)."""
+    if not text:
+        return text
+    if not re.search(r"[\u0980-\u09FF]", text):
+        return text
+    text = re.sub(r"\s*।\s*", "। ", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if "।" not in text and len(text.split()) > 18:
+        words = text.split()
+        mid = len(words) // 2
+        text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
+    if config.ENABLE_PUNCTUATION_RESTORE:
+        torch.cuda.empty_cache()
+    return text.strip()
+
+
 def _resolve_torch_device() -> str:
     if config.DEVICE == "cuda" and torch.cuda.is_available():
         return "cuda:0"
@@ -149,7 +167,10 @@ def _transcribe_chunk(model, processor, chunk_waveform, language="bn"):
 
     text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
     text = _SPECIAL_TOKEN_RE.sub("", text)
-    return _WHITESPACE_RE.sub(" ", text).strip()
+    text = _WHITESPACE_RE.sub(" ", text).strip()
+    text = _restore_bengali_punct(text)
+    torch.cuda.empty_cache()
+    return text
 
 
 def transcribe_with_lora(model, processor, audio_path, diarization=None, language="bn"):

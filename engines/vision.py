@@ -9,8 +9,9 @@ from typing import List, Dict, Tuple, Optional
 
 import cv2
 import numpy as np
+import torch
 from insightface.app import FaceAnalysis
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import AgglomerativeClustering, DBSCAN
 
 from config import config
 from models import FaceOccurrence
@@ -190,7 +191,7 @@ def _process_frames_with_vision(
 
 
 def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurrence]:
-    """Run DBSCAN on UNKNOWN face embeddings and assign cluster IDs."""
+    """Cluster UNKNOWN face embeddings: Agglomerative (with NUM_SPEAKERS hint) or DBSCAN fallback."""
     unknown_indices = []
     unknown_embeddings = []
 
@@ -200,16 +201,35 @@ def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurr
             unknown_embeddings.append(occ.embedding)
 
     if len(unknown_embeddings) < config.DBSCAN_MIN_SAMPLES:
+        torch.cuda.empty_cache()
         return occurrences
 
     embeddings_array = np.array(unknown_embeddings)
-    clustering = DBSCAN(
-        eps=config.DBSCAN_EPS,
-        min_samples=config.DBSCAN_MIN_SAMPLES,
-        metric="cosine",
-    ).fit(embeddings_array)
-
-    labels = clustering.labels_
+    # Count already-resolved registry identities to estimate remaining speakers
+    try:
+        registry_names = {o.resolved_face_id for o in occurrences if o.resolved_face_id not in ("UNKNOWN", "face_cluster_noise") and not o.resolved_face_id.startswith("face_cluster_")}
+        n_registry = len(registry_names)
+        use_agg = (config.CLUSTERING == "agglomerative" and config.NUM_SPEAKERS is not None)
+        if use_agg:
+            n_clusters = max(1, int(config.NUM_SPEAKERS) - n_registry)
+            n_clusters = min(n_clusters, len(unknown_embeddings))
+            if n_clusters >= 2:
+                clustering = AgglomerativeClustering(n_clusters=n_clusters, metric="cosine", linkage="average")
+                labels = clustering.fit_predict(embeddings_array)
+            else:
+                labels = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine").fit(embeddings_array).labels_
+        else:
+            clustering = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine")
+            labels = clustering.fit(embeddings_array).labels_
+    except Exception:
+        try:
+            clustering = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine")
+            labels = clustering.fit(embeddings_array).labels_
+        except Exception:
+            torch.cuda.empty_cache()
+            return occurrences
+    finally:
+        torch.cuda.empty_cache()
 
     for idx, label in zip(unknown_indices, labels):
         if label >= 0:

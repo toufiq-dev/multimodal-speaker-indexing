@@ -84,7 +84,7 @@ class Config:
     MAX_SPEAKERS: Optional[int] = None
 
     # --- Post-processing ---
-    ENABLE_PUNCTUATION_RESTORE: bool = False  # requires a punctuator backend
+    ENABLE_PUNCTUATION_RESTORE: bool = True  # lightweight regex heuristic (no heavy model), fixes NER on unpunctuated Whisper
 
     BASE_DIR: Path = field(default_factory=_resolve_base_dir)
     DATA_INPUT_DIR: Path = field(init=False)

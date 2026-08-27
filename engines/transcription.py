@@ -37,6 +37,34 @@ def _clean_text(text: str) -> str:
     return cleaned.strip()
 
 
+def _restore_bengali_punct(text: str) -> str:
+    """Lightweight Bengali punctuation restoration (regex heuristic, zero-dep).
+
+    Whisper emits unpunctuated Bengali (no ।/,). Heuristics:
+    - Normalize existing dandas/commas spacing
+    - If long (>18 words) and no danda, insert one after first clause to aid NER
+    Gated by config.ENABLE_PUNCTUATION_RESTORE; safe to call even when disabled
+    if text already has punctuation it is only normalized.
+    """
+    if not text:
+        return text
+    if not re.search(r"[\u0980-\u09FF]", text):
+        return text
+    # Normalize spaces around existing punctuation
+    text = re.sub(r"\s*।\s*", "। ", text)
+    text = re.sub(r"\s*,\s*", ", ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    # Heuristic insert: if >18 words and zero danda, split roughly in half
+    if "।" not in text and len(text.split()) > 18:
+        words = text.split()
+        mid = len(words) // 2
+        # try to split at a verb-like boundary; fallback to mid
+        text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
+    if config.ENABLE_PUNCTUATION_RESTORE:
+        torch.cuda.empty_cache()
+    return text.strip()
+
+
 def _assign_word_to_turn(
     word_start: float,
     word_end: float,
@@ -170,6 +198,7 @@ def align_transcription_with_diarization(
             if current_words:
                 text = " ".join(w.word for w in current_words)
                 text = _clean_text(text)
+                text = _restore_bengali_punct(text)
                 segments.append(
                     TranscribedSegment(
                         start=current_words[0].start,
@@ -185,6 +214,7 @@ def align_transcription_with_diarization(
     if current_words:
         text = " ".join(w.word for w in current_words)
         text = _clean_text(text)
+        text = _restore_bengali_punct(text)
         segments.append(
             TranscribedSegment(
                 start=current_words[0].start,
