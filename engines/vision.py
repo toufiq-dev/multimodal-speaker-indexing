@@ -86,7 +86,10 @@ def _load_registry_embeddings(app: FaceAnalysis) -> Dict[str, Tuple[np.ndarray, 
     if not registry_dir.exists():
         return registry
 
-    image_files = sorted(registry_dir.glob("*.jpg")) + sorted(registry_dir.glob("*.png"))
+    image_files: list = []
+    for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+        image_files.extend(sorted(registry_dir.glob(ext)))
+    image_files.sort(key=lambda p: p.name)
     for idx, img_path in enumerate(image_files):
         try:
             img = cv2.imread(str(img_path))
@@ -118,7 +121,10 @@ def _process_frames_with_vision(
     prev_faces: List[Tuple[Tuple[int, int, int, int], np.ndarray, np.ndarray]] = []  # (box, embedding, frame)
 
     for frame_idx, frame_path in enumerate(frame_paths):
-        frame_time = (frame_idx + 1) / config.VISION_FPS
+        # Frames are extracted at t=0, 1/fps, 2/fps ... so frame i sits at
+        # i/fps. The old '(idx+1)/fps' shifted every face occurrence a full
+        # second late, corrupting audio-visual association.
+        frame_time = frame_idx / config.VISION_FPS
 
         try:
             frame = cv2.imread(frame_path)
@@ -245,6 +251,7 @@ def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None
         providers=['CUDAExecutionProvider', 'CPUExecutionProvider'],
         allowed_modules=['detection', 'recognition'],
     )
+    # ctx_id=-1 forces CPU (onnxruntime has no MPS provider on macOS).
     app.prepare(ctx_id=0 if config.DEVICE == "cuda" else -1, det_size=(640, 640))
 
     registry = _load_registry_embeddings(app)

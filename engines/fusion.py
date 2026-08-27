@@ -1,10 +1,28 @@
-"""Fusion engine for multimodal speaker identity resolution."""
+"""Fusion engine for multimodal speaker identity resolution.
+
+Rebuilt after the failed end-to-end run. Three structural changes:
+
+1. ``create_final_segments`` no longer pastes whole transcribed blocks into
+   every overlapping diarization turn (this produced 157/191 duplicated cues
+   in the first full-show test). With word timestamps, finals are built from
+   exactly the words whose midpoint falls inside the turn. Without words
+   (LoRA fallback), block text is split PROPORTIONALLY across overlapping
+   turns so every character is emitted exactly once.
+
+2. The untrained Xavier-init GatingNetwork is REMOVED from the decision
+   path (it output ~0.5 for everything -> meaningless confidences). Identity
+   resolution now uses deterministic, interpretable evidence scores:
+   registry faces > host self-intro anchor ("আমি <নাম>") > NER-name/speaker
+   co-occurrence matching > face clusters > generic Speaker_N.
+
+3. NER names are matched to speakers by CO-OCCURRENCE EVIDENCE (how often
+   the name appears in a speaker's own transcript) via greedy bipartite
+   matching -- never by list position.
+"""
 
 from __future__ import annotations
 
-import torch
-import torch.nn as nn
-from pathlib import Path
+import re
 from typing import List, Dict, Tuple, Optional
 
 from config import config
@@ -16,257 +34,304 @@ from models import (
 )
 
 
-class GatingNetwork(nn.Module):
-    """MLP for audio-visual speaker-face association probability."""
+# Bengali guest-introduction anchors ("সঙ্গে আছেন <Name>" etc.) are used by
+# downstream tooling; host-anchor extraction itself lives in engines.nlp.
+_GUEST_ANCHOR_RE = re.compile(
+    r"(?:সঙ্গে আছেন|সাথে আছেন|হলেন|উপস্থিত)\s+([\u0980-\u09FF ]{2,40}?)(?=\s(?:সঙ্গে|সাথে)|$|[,।])"
+)
 
-    def __init__(self, input_dim: int = 3, hidden_dim: int = 8):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1),
-            nn.Sigmoid(),
-        )
-        self._init_weights()
 
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-    def train_step(
-        self,
-        features: torch.Tensor,
-        labels: torch.Tensor,
-        optimizer: torch.optim.Optimizer,
-        criterion: nn.Module,
-    ) -> float:
-        """Single training step."""
-        self.train()
-        optimizer.zero_grad()
-        outputs = self(features).squeeze()
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
-        return loss.item()
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s).strip()
 
 
 class GatingFusion:
-    """Fuses diarization, transcription, vision, and NLP into final speaker segments."""
+    """Deterministic multimodal identity resolver + final-segment builder.
+
+    The class keeps its historical name for API compatibility, but contains
+    no learned component anymore.
+    """
 
     def __init__(self, ordered_names: Optional[List[str]] = None):
         self.ordered_names = ordered_names or []
-        self.gating_net = GatingNetwork()
-        self._trained = False
 
-    def _get_audio_confidence(
-        self,
-        dia_seg: DiarizationSegment,
-        transcribed: List[TranscribedSegment],
-    ) -> float:
-        """Check if any transcribed segment matches this speaker."""
-        for tseg in transcribed:
-            if tseg.speaker_id == dia_seg.speaker_id:
-                if not (tseg.end <= dia_seg.start or tseg.start >= dia_seg.end):
-                    return 1.0
-        return 0.0
-
+    # ------------------------------------------------------------------
+    # Evidence collection
+    # ------------------------------------------------------------------
     def _aggregate_faces_per_speaker(
         self,
         diarization: List[DiarizationSegment],
         faces: List[FaceOccurrence],
     ) -> Dict[str, List[FaceOccurrence]]:
-        """Collect all faces overlapping each speaker's segments."""
+        """Collect all faces observed during each speaker's talking time."""
         speaker_faces: Dict[str, List[FaceOccurrence]] = {seg.speaker_id: [] for seg in diarization}
-
         for face in faces:
             for dia_seg in diarization:
-                if face.frame_time >= dia_seg.start and face.frame_time <= dia_seg.end:
+                if dia_seg.start <= face.frame_time <= dia_seg.end:
                     speaker_faces[dia_seg.speaker_id].append(face)
-
         return speaker_faces
 
-    def _get_best_face_for_speaker(
-        self,
-        speaker_id: str,
-        speaker_faces: Dict[str, List[FaceOccurrence]],
-    ) -> Optional[FaceOccurrence]:
-        """Select face with highest average confidence for this speaker."""
-        faces = speaker_faces.get(speaker_id, [])
-        if not faces:
-            return None
+    def _best_registry_face_per_speaker(
+        self, speaker_faces: Dict[str, List[FaceOccurrence]]
+    ) -> Dict[str, Tuple[str, float]]:
+        """Per speaker: (registry_name, max_face_sim) over non-cluster matches."""
+        out: Dict[str, Tuple[str, float]] = {}
+        for spk, occs in speaker_faces.items():
+            best_name, best_conf = None, 0.0
+            for f in occs:
+                fid = f.resolved_face_id
+                if fid == "UNKNOWN" or fid.startswith("face_cluster_"):
+                    continue
+                if f.face_confidence > best_conf:
+                    best_name, best_conf = fid, f.face_confidence
+            if best_name:
+                out[spk] = (best_name, best_conf)
+        return out
 
-        # Group by resolved_face_id and compute average confidence
-        face_groups: Dict[str, List[FaceOccurrence]] = {}
-        for face in faces:
-            face_groups.setdefault(face.resolved_face_id, []).append(face)
+    def _best_cluster_per_speaker(
+        self, speaker_faces: Dict[str, List[FaceOccurrence]]
+    ) -> Dict[str, Tuple[str, int]]:
+        """Per speaker: dominant (cluster_label, hit_count) among clustered faces."""
+        counts: Dict[str, Dict[str, int]] = {}
+        for spk, occs in speaker_faces.items():
+            for f in occs:
+                fid = f.resolved_face_id
+                if fid and fid.startswith("face_cluster_") and fid != "face_cluster_noise":
+                    counts.setdefault(spk, {})
+                    counts[spk][fid] = counts[spk].get(fid, 0) + 1
+        out: Dict[str, Tuple[str, int]] = {}
+        for spk, c in counts.items():
+            label = max(c.items(), key=lambda kv: kv[1])[0]
+            out[spk] = (label, c[label])
+        return out
 
-        best_face = None
-        best_avg_conf = -1.0
-
-        for face_id, group in face_groups.items():
-            avg_conf = sum(f.face_confidence for f in group) / len(group)
-            if avg_conf > best_avg_conf:
-                best_avg_conf = avg_conf
-                # Return representative face (highest individual confidence)
-                best_face = max(group, key=lambda f: f.face_confidence)
-
-        return best_face
-
-    def _extract_features(
-        self,
-        dia_seg: DiarizationSegment,
-        transcribed: List[TranscribedSegment],
-        best_face: Optional[FaceOccurrence],
-    ) -> Tuple[float, float, float]:
-        """Extract [audio_conf, face_conf, lip_sync] for gating network."""
-        audio_conf = self._get_audio_confidence(dia_seg, transcribed)
-
-        if best_face:
-            face_conf = best_face.face_confidence
-            lip_sync = best_face.lip_sync_score
-        else:
-            face_conf = 0.0
-            lip_sync = 0.0
-
-        return audio_conf, face_conf, lip_sync
-
-    def train_gating_network(
-        self,
+    @staticmethod
+    def _host_anchor_evidence(
         diarization: List[DiarizationSegment],
         transcribed: List[TranscribedSegment],
-        faces: List[FaceOccurrence],
-        labels: List[float],
-        epochs: int = 50,
-        lr: float = 1e-3,
-    ):
-        """Train gating network with supervised labels (1=match, 0=mismatch)."""
-        if len(diarization) != len(labels):
-            raise ValueError("Labels must match diarization segments")
+    ) -> List[Tuple[str, str, int]]:
+        """Find 'আমি <Name>' self-introductions.
 
-        speaker_faces = self._aggregate_faces_per_speaker(diarization, faces)
+        Returns [(speaker_id, name, hit_count)] sorted by hit count desc.
+        This is the primary textual anchor for identifying the HOST, since a
+        presenter says "আমি X" while speaking -- direct first-person evidence.
+        Name capture/trimming logic lives in engines.nlp (single source).
+        """
+        from engines.nlp import extract_anchor_names_from_text  # lazy: avoids heavy import at module load
 
-        features_list = []
-        for dia_seg in diarization:
-            best_face = self._get_best_face_for_speaker(dia_seg.speaker_id, speaker_faces)
-            feats = self._extract_features(dia_seg, transcribed, best_face)
-            features_list.append(feats)
+        hits: Dict[Tuple[str, str], int] = {}
+        for tseg in transcribed:
+            spk = tseg.speaker_id
+            if not spk or spk == "UNKNOWN":
+                continue
+            for name in extract_anchor_names_from_text(tseg.text):
+                hits[(spk, name)] = hits.get((spk, name), 0) + 1
+        return sorted(
+            ((spk, name, n) for (spk, name), n in hits.items()),
+            key=lambda x: -x[2],
+        )
 
-        features = torch.tensor(features_list, dtype=torch.float32)
-        labels_tensor = torch.tensor(labels, dtype=torch.float32)
+    @staticmethod
+    def _cooccurrence_scores(
+        names: List[str],
+        diarization: List[DiarizationSegment],
+        transcribed: List[TranscribedSegment],
+    ) -> Dict[Tuple[str, str], float]:
+        """Evidence score[(speaker, name)] = weighted mentions of the name in
+        that speaker's own transcript (intro window weighted higher)."""
+        scores: Dict[Tuple[str, str], float] = {}
+        lowered_names = [(n, n.replace(" ", "")) for n in names]
+        for tseg in transcribed:
+            spk = tseg.speaker_id
+            if not spk or spk == "UNKNOWN":
+                continue
+            compact = tseg.text.replace(" ", "")
+            weight = 2.0 if tseg.start < config.NLP_INTRO_SECONDS else 1.0
+            for name, compact_name in lowered_names:
+                if compact_name and compact_name in compact:
+                    key = (spk, name)
+                    scores[key] = scores.get(key, 0.0) + weight
+        return scores
 
-        optimizer = torch.optim.Adam(self.gating_net.parameters(), lr=lr)
-        criterion = nn.BCELoss()
-
-        for _ in range(epochs):
-            self.gating_net.train_step(features, labels_tensor, optimizer, criterion)
-
-        self._trained = True
-
+    # ------------------------------------------------------------------
+    # Identity resolution (deterministic cascade)
+    # ------------------------------------------------------------------
     def resolve_identities(
         self,
         diarization: List[DiarizationSegment],
         transcribed: List[TranscribedSegment],
         faces: List[FaceOccurrence],
+        ground_truth_labels: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Tuple[str, float]]:
-        """
-        Map each diarization speaker_id to a resolved name and confidence.
+        """Map each diarization speaker_id -> (resolved_name, confidence).
 
-        Returns:
-            Dict mapping speaker_id -> (resolved_name, confidence)
+        Cascade (first match wins):
+          0. Ground-truth annotation overrides (evaluation mode).
+          1. Registered face recognition above threshold.
+          2. Host anchor ("আমি <Name>") spoken by that very speaker.
+          3. Greedy name<->speaker matching on co-occurrence evidence.
+          4. Face cluster labels.
+          5. Generic Speaker_N.
         """
+        resolved: Dict[str, Tuple[str, float]] = {}
+        used_names: set = set()
+
+        speaker_ids = list(dict.fromkeys(s.speaker_id for s in diarization))
+
+        # Pass 0: explicit ground-truth labels (annotated evaluation data).
+        if ground_truth_labels:
+            for spk in speaker_ids:
+                gt = ground_truth_labels.get(spk)
+                if gt:
+                    resolved[spk] = (gt, 1.0)
+                    used_names.add(gt)
+
         speaker_faces = self._aggregate_faces_per_speaker(diarization, faces)
 
-        # Get best face per speaker
-        speaker_best_face: Dict[str, Optional[FaceOccurrence]] = {}
-        for dia_seg in diarization:
-            speaker_best_face[dia_seg.speaker_id] = self._get_best_face_for_speaker(
-                dia_seg.speaker_id, speaker_faces
-            )
-
-        # Get gating probabilities
-        speaker_probs: Dict[str, float] = {}
-        for dia_seg in diarization:
-            best_face = speaker_best_face.get(dia_seg.speaker_id)
-            feats = self._extract_features(dia_seg, transcribed, best_face)
-            x = torch.tensor([feats], dtype=torch.float32)
-            with torch.no_grad():
-                self.gating_net.eval()
-                prob = self.gating_net(x).item()
-            speaker_probs[dia_seg.speaker_id] = prob
-
-        # Sort speakers by probability (highest first)
-        sorted_speakers = sorted(speaker_probs.items(), key=lambda x: -x[1])
-
-        name_idx = 0
-        resolved: Dict[str, Tuple[str, float]] = {}
-        used_names = set()
-
-        # First pass: high-confidence registered faces (prob > 0.5 or high face_conf)
-        for spk_id, prob in sorted_speakers:
-            best_face = speaker_best_face.get(spk_id)
-            face_conf = best_face.face_confidence if best_face else 0.0
-            face_name = best_face.resolved_face_id if best_face else "UNKNOWN"
-
-            # Assign registered name if either gating prob high OR face confidence high
-            if face_name != "UNKNOWN" and not face_name.startswith("face_cluster_"):
-                if prob > 0.5 or face_conf > config.FACE_SIM_THRESHOLD:
-                    if face_name not in used_names:
-                        resolved[spk_id] = (face_name, max(prob, face_conf))
-                        used_names.add(face_name)
-
-        # Second pass: ordered_names from NLP
-        for spk_id, prob in sorted_speakers:
-            if spk_id in resolved:
+        # Pass 1: registry faces.
+        reg = self._best_registry_face_per_speaker(speaker_faces)
+        for spk in speaker_ids:
+            if spk in resolved:
                 continue
-            if name_idx < len(self.ordered_names):
-                name = self.ordered_names[name_idx]
+            if spk in reg and reg[spk][1] >= config.FACE_SIM_THRESHOLD:
+                name, conf = reg[spk]
                 if name not in used_names:
-                    resolved[spk_id] = (name, prob)
-                    used_names.add(name)
-                    name_idx += 1
-
-        # Third pass: face clusters
-        for spk_id, prob in sorted_speakers:
-            if spk_id in resolved:
-                continue
-            best_face = speaker_best_face.get(spk_id)
-            if best_face and best_face.resolved_face_id.startswith("face_cluster_"):
-                name = best_face.resolved_face_id
-                if name not in used_names:
-                    resolved[spk_id] = (name, prob)
+                    resolved[spk] = (name, round(conf, 3))
                     used_names.add(name)
 
-        # Fourth pass: registered faces with low prob but high face_conf (fallback)
-        for spk_id, prob in sorted_speakers:
-            if spk_id in resolved:
+        # Pass 2: host self-intro anchor.
+        for spk, name, hit_count in self._host_anchor_evidence(diarization, transcribed):
+            if spk in resolved or name in used_names or hit_count < 1:
                 continue
-            best_face = speaker_best_face.get(spk_id)
-            if best_face and best_face.resolved_face_id != "UNKNOWN" and not best_face.resolved_face_id.startswith("face_cluster_"):
-                face_conf = best_face.face_confidence
-                if face_conf > config.FACE_SIM_THRESHOLD:
-                    name = best_face.resolved_face_id
-                    if name not in used_names:
-                        resolved[spk_id] = (name, face_conf)
-                        used_names.add(name)
+            conf = min(0.95, 0.6 + 0.1 * hit_count)
+            resolved[spk] = (name, conf)
+            used_names.add(name)
 
-        # Final pass: generic Speaker_N
-        speaker_counter = 1
-        for spk_id, prob in sorted_speakers:
-            if spk_id not in resolved:
-                while f"Speaker_{speaker_counter}" in used_names:
-                    speaker_counter += 1
-                name = f"Speaker_{speaker_counter}"
-                resolved[spk_id] = (name, 0.5)
+        # Pass 3: co-occurrence greedy matching (NEVER positional).
+        candidates = [n for n in self.ordered_names
+                      if n and n not in used_names]
+        if candidates and len(resolved) < len(speaker_ids):
+            scores = self._cooccurrence_scores(candidates, diarization, transcribed)
+            pairs = sorted(scores.items(), key=lambda kv: -kv[1])
+            for (spk, name), sc in pairs:
+                if spk in resolved or name in used_names or sc <= 0:
+                    continue
+                conf = min(0.9, 0.5 + 0.05 * sc)
+                resolved[spk] = (name, round(conf, 3))
                 used_names.add(name)
-                speaker_counter += 1
+
+        # Pass 4: face clusters (keep as visual-only identity).
+        clusters = self._best_cluster_per_speaker(speaker_faces)
+        for spk in speaker_ids:
+            if spk in resolved:
+                continue
+            if spk in clusters:
+                label, hits = clusters[spk]
+                if label not in used_names:
+                    resolved[spk] = (label, min(0.5, 0.1 * hits))
+                    used_names.add(label)
+
+        # Pass 5: generic labels.
+        counter = 1
+        for spk in speaker_ids:
+            if spk in resolved:
+                continue
+            while f"Speaker_{counter}" in used_names:
+                counter += 1
+            resolved[spk] = (f"Speaker_{counter}", 0.5)
+            used_names.add(f"Speaker_{counter}")
+            counter += 1
 
         return resolved
+
+    # ------------------------------------------------------------------
+    # Final segment construction
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _iter_words(transcribed: List[TranscribedSegment]):
+        for tseg in transcribed:
+            for w in tseg.words:
+                yield w
+
+    def _finals_from_words(
+        self,
+        diarization: List[DiarizationSegment],
+        transcribed: List[TranscribedSegment],
+        resolved_names: Dict[str, Tuple[str, float]],
+    ) -> List[FinalSegment]:
+        """Exact construction: a turn's text = the words whose midpoint lies
+        inside the turn. Kills the duplication bug class by construction."""
+        finals: List[FinalSegment] = []
+        for dia_seg in sorted(diarization, key=lambda d: d.start):
+            mid_lo, mid_hi = dia_seg.start, dia_seg.end
+            words_in_turn = [
+                w for w in self._iter_words(transcribed)
+                if mid_lo <= (w.start + w.end) / 2.0 <= mid_hi
+            ]
+            text = _norm(" ".join(w.word for w in words_in_turn))
+            if not text:
+                continue
+            speaker_name, confidence = resolved_names.get(
+                dia_seg.speaker_id, ("UNKNOWN", 0.0))
+            finals.append(FinalSegment(
+                start=dia_seg.start,
+                end=dia_seg.end,
+                speaker=speaker_name,
+                text=text,
+                confidence=confidence,
+            ))
+        return finals
+
+    def _finals_from_proportional_split(
+        self,
+        diarization: List[DiarizationSegment],
+        transcribed: List[TranscribedSegment],
+        resolved_names: Dict[str, Tuple[str, float]],
+    ) -> List[FinalSegment]:
+        """Word-less fallback (e.g. LoRA chunk path): split each transcribed
+        block's text across overlapping same-speaker turns in proportion to
+        overlap duration. Each block's characters are emitted exactly once."""
+        text_parts: List[List[str]] = [[] for _ in diarization]
+        order = sorted(range(len(diarization)), key=lambda i: diarization[i].start)
+
+        for tseg in transcribed:
+            overlaps: List[Tuple[int, float]] = []
+            for idx in order:
+                d = diarization[idx]
+                if d.speaker_id != tseg.speaker_id:
+                    continue
+                ov = min(tseg.end, d.end) - max(tseg.start, d.start)
+                if ov > 0:
+                    overlaps.append((idx, ov))
+            if not overlaps:
+                continue
+            total_ov = sum(ov for _, ov in overlaps)
+            tokens = tseg.text.split()
+            n = len(tokens)
+            cursor = 0
+            last_i = len(overlaps) - 1
+            for j, (idx, ov) in enumerate(overlaps):
+                if j == last_i:
+                    take = tokens[cursor:]
+                else:
+                    take_n = int(round(n * (ov / total_ov))) if total_ov > 0 else 0
+                    take = tokens[cursor:cursor + take_n]
+                    cursor += len(take)
+                if take:
+                    text_parts[idx].extend(take)
+
+        finals: List[FinalSegment] = []
+        for idx in order:
+            text = _norm(" ".join(text_parts[idx]))
+            if not text:
+                continue
+            d = diarization[idx]
+            speaker_name, confidence = resolved_names.get(d.speaker_id, ("UNKNOWN", 0.0))
+            finals.append(FinalSegment(
+                start=d.start, end=d.end,
+                speaker=speaker_name, text=text, confidence=confidence,
+            ))
+        return finals
 
     def create_final_segments(
         self,
@@ -274,36 +339,12 @@ class GatingFusion:
         transcribed: List[TranscribedSegment],
         resolved_names: Dict[str, Tuple[str, float]],
     ) -> List[FinalSegment]:
-        """Create FinalSegment by merging transcribed text per diarization segment."""
-        final_segments: List[FinalSegment] = []
-
-        for dia_seg in diarization:
-            matching_texts = []
-            for tseg in transcribed:
-                if tseg.speaker_id != dia_seg.speaker_id:
-                    continue
-                if tseg.end <= dia_seg.start or tseg.start >= dia_seg.end:
-                    continue
-                matching_texts.append(tseg.text)
-
-            if not matching_texts:
-                continue
-
-            combined_text = " ".join(matching_texts).strip()
-            if not combined_text:
-                continue
-
-            speaker_name, confidence = resolved_names.get(dia_seg.speaker_id, ("UNKNOWN", 0.0))
-
-            final_segments.append(FinalSegment(
-                start=dia_seg.start,
-                end=dia_seg.end,
-                speaker=speaker_name,
-                text=combined_text,
-                confidence=confidence,
-            ))
-
-        return final_segments
+        """Create FinalSegments directly from diarization turns."""
+        has_words = any(tseg.words for tseg in transcribed)
+        if has_words:
+            return self._finals_from_words(diarization, transcribed, resolved_names)
+        return self._finals_from_proportional_split(
+            diarization, transcribed, resolved_names)
 
 
 def run_fusion_pipeline(
@@ -311,20 +352,22 @@ def run_fusion_pipeline(
     transcribed: List[TranscribedSegment],
     faces: List[FaceOccurrence],
     ordered_names: Optional[List[str]] = None,
+    ground_truth_labels: Optional[Dict[str, str]] = None,
 ) -> List[FinalSegment]:
-    """
-    Run full fusion pipeline.
+    """Run full fusion pipeline.
 
     Args:
         diarization: Speaker diarization segments.
         transcribed: Transcribed segments with speaker assignments.
         faces: Face occurrences with confidence and lip-sync.
         ordered_names: Names extracted from NLP intro (optional).
+        ground_truth_labels: Optional annotated mapping speaker_id -> real
+            name (evaluation mode / registry-less datasets).
 
     Returns:
         List of FinalSegment with resolved speaker names.
     """
     fusion = GatingFusion(ordered_names=ordered_names)
-    resolved = fusion.resolve_identities(diarization, transcribed, faces)
-    final_segments = fusion.create_final_segments(diarization, transcribed, resolved)
-    return final_segments
+    resolved = fusion.resolve_identities(
+        diarization, transcribed, faces, ground_truth_labels=ground_truth_labels)
+    return fusion.create_final_segments(diarization, transcribed, resolved)

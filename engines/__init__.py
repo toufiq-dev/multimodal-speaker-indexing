@@ -4,8 +4,8 @@ from engines.media import extract_audio, extract_frames
 from engines.diarization import run_diarization
 from engines.transcription import transcribe_audio, align_transcription_with_diarization
 from engines.asr_lora import load_lora_whisper, transcribe_with_lora
-from engines.nlp import extract_speaker_names_from_intro
-from engines.fusion import run_fusion_pipeline, GatingFusion, GatingNetwork
+from engines.nlp import extract_speaker_names_from_intro, extract_intro_anchor
+from engines.fusion import run_fusion_pipeline, GatingFusion
 
 
 # Lazy load vision to prevent OpenCV/InsightFace crashes during audio/transcription imports
@@ -26,7 +26,7 @@ __all__ = [
     "transcribe_with_lora",
     "run_vision_pipeline",
     "extract_speaker_names_from_intro",
+    "extract_intro_anchor",
     "run_fusion_pipeline",
     "GatingFusion",
-    "GatingNetwork",
 ]

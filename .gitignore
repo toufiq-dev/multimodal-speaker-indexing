@@ -1,9 +1,13 @@
-# Data directories
-data/input/
-data/output/
-data/registry/
+# Data directories (registry jpg allowed for reproducibility; input/output ignored)
+data/input/*
+data/output/*
+data/registry/*
+!data/registry/*.jpg
+!data/registry/*.jpeg
+!data/registry/*.png
+!data/registry/*.webp
 
-# Media files
+# Media files (except registry)
 *.mp4
 *.wav
 *.jpg
@@ -11,6 +15,10 @@ data/registry/
 *.png
 *.mp3
 *.m4a
+!data/registry/*.jpg
+!data/registry/*.jpeg
+!data/registry/*.png
+!data/registry/*.webp
 
 # Python cache
 __pycache__/

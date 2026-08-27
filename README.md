@@ -11,7 +11,7 @@ A language-agnostic framework for **speaker identity resolution** in multi-speak
 | **Face Recognition** | InsightFace (RetinaFace + ArcFace) | Face detection, embedding, tracking |
 | **Lip-Sync** | Mouth region pixel diff | Audio-visual synchronization score |
 | **NER** | BanglaBERT / mBERT-Bengali | Speaker name extraction from intro |
-| **Fusion** | MLP Gating Network + Heuristics | Multimodal identity resolution |
+| **Fusion** | Deterministic Identity Cascade | Multimodal identity resolution |
 
 ## Pipeline
 
@@ -23,11 +23,14 @@ Video
 └── Transcript (first 120s) → NER → Speaker names
 
 Fusion:
-  For each diarization segment:
-    1. Aggregate overlapping faces → best face per speaker
-    2. Extract features: [audio_conf, face_conf, lip_sync]
-    3. Gating network → P(match)
-    4. Identity assignment: registered name → NLP name → cluster → generic
+  Identity resolution cascade (first match wins):
+    0. Ground-truth labels (evaluation mode)
+    1. Registered face recognition ≥ threshold
+    2. Host self-intro anchor ("আমি <Name>")
+    3. Greedy name↔speaker co-occurrence (NER)
+    4. Face cluster label (visual-only)
+    5. Generic Speaker_N (fallback)
+  Final segments: word-midpoint containment (or proportional split fallback)
   Output: FinalSegment(start, end, speaker, text, confidence)
 ```
 
@@ -158,12 +161,12 @@ multimodal-speaker-indexing/
 ├── requirements.txt
 ├── engines/
 │   ├── media.py           # Audio/frame extraction (ffmpeg)
-│   ├── diarization.py     # pyannote 3.1 two-pass
+│   ├── diarization.py     # pyannote 3.1 single-pass
 │   ├── transcription.py   # faster-whisper + alignment
 │   ├── asr_lora.py        # Whisper-LoRA chunked inference
 │   ├── vision.py          # InsightFace + DBSCAN clustering
 │   ├── nlp.py             # BanglaBERT NER name extraction
-│   └── fusion.py          # GatingNetwork + identity resolution
+│   └── fusion.py          # Identity cascade + final segments
 ├── data/
 │   ├── input/             # Videos (gitignored)
 │   ├── registry/          # Reference face photos

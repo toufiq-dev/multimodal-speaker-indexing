@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import torch
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from pyannote.audio import Pipeline
 
@@ -20,22 +20,14 @@ def _load_pipeline() -> Pipeline:
     try:
         pipeline = Pipeline.from_pretrained(
             config.PYANNOTE_MODEL,
+            token=hf_token if hf_token else None,
+        )
+    except TypeError:
+        # Older pyannote versions use use_auth_token
+        pipeline = Pipeline.from_pretrained(
+            config.PYANNOTE_MODEL,
             use_auth_token=hf_token if hf_token else None,
         )
-    except TypeError as e:
-        if "use_auth_token" in str(e):
-            try:
-                pipeline = Pipeline.from_pretrained(
-                    config.PYANNOTE_MODEL,
-                    token=hf_token if hf_token else None,
-                )
-            except TypeError as e2:
-                if "token" in str(e2):
-                    pipeline = Pipeline.from_pretrained(config.PYANNOTE_MODEL)
-                else:
-                    raise
-        else:
-            raise
 
     if config.DEVICE == "cuda" and torch.cuda.is_available():
         pipeline.to(torch.device("cuda"))
@@ -51,15 +43,19 @@ def _collect_speakers(annotation) -> List[str]:
     return sorted(speakers)
 
 
-def run_diarization(audio_path: str) -> List[DiarizationSegment]:
+def run_diarization(audio_path: str, num_speakers: Optional[int] = None) -> List[DiarizationSegment]:
     """
-    Run two-pass speaker diarization on audio file.
+    Run SINGLE-PASS speaker diarization with optional speaker-count hints.
 
-    Pass 1: Run without num_speakers constraint.
-    Pass 2: Re-run with num_speakers=unique_speakers from pass 1 (if applicable).
+    The previous two-pass scheme (unconstrained, then re-run constrained on
+    pass-1's count) doubled cost and locked in any pass-1 error. pyannote 3.x
+    accepts num_speakers / min_speakers / max_speakers directly.
 
     Args:
         audio_path: Path to input WAV audio file.
+        num_speakers: Exact speaker count if known (e.g. 5 for this show
+            format); overrides config.NUM_SPEAKERS. None -> unconstrained or
+            config bounds.
 
     Returns:
         List of DiarizationSegment objects sorted by start time.
@@ -70,19 +66,18 @@ def run_diarization(audio_path: str) -> List[DiarizationSegment]:
 
     pipeline = _load_pipeline()
 
-    # Pass 1: Unconstrained
-    annotation = pipeline(str(audio))
-    speakers = _collect_speakers(annotation)
+    # Single pass with hints when available.
+    kwargs = config.diarization_kwargs()
+    if num_speakers is not None:
+        kwargs = {"num_speakers": int(num_speakers)}
 
-    if not speakers:
-        torch.cuda.empty_cache()
-        return []
-
-    # Pass 2: With num_speakers hint
     try:
-        annotation = pipeline(str(audio), num_speakers=len(speakers))
+        result = pipeline(str(audio), **kwargs)
     except Exception:
-        pass  # Fall back to pass 1 result
+        result = pipeline(str(audio))
+
+    # pyannote 4.x returns DiarizeOutput; extract the Annotation object.
+    annotation = getattr(result, "speaker_diarization", result)
 
     segments: List[DiarizationSegment] = []
     for turn, _, speaker in annotation.itertracks(yield_label=True):

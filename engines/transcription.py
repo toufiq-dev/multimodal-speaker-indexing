@@ -15,58 +15,68 @@ from models import DiarizationSegment, TranscribedSegment, WordToken
 
 def _load_model() -> WhisperModel:
     """Load faster-whisper model with appropriate compute type."""
-    compute_type = "float16" if config.DEVICE == "cuda" else "int8"
+    device, compute_type = config.fw_device_and_compute()
     model = WhisperModel(
         config.WHISPER_MODEL,
-        device=config.DEVICE,
+        device=device,
         compute_type=compute_type,
     )
     return model
 
 
 def _clean_text(text: str) -> str:
-    """Apply regex cleaning patterns from config."""
+    """Apply regex cleaning rules from config.
+
+    Rules are (pattern, replacement) pairs so repeated-character runs are
+    COLLAPSED to one instance (r"\1") instead of deleted entirely — the old
+    behaviour erased legitimate doubled Bangla graphemes.
+    """
     cleaned = text
-    for pattern in config.REGEX_FILTER_PATTERNS:
-        cleaned = re.sub(pattern, "", cleaned)
+    for pattern, replacement in config.TEXT_CLEANING_RULES:
+        cleaned = re.sub(pattern, replacement, cleaned)
     return cleaned.strip()
 
 
-def _compute_iou(word_start: float, word_end: float, seg_start: float, seg_end: float) -> float:
-    """Compute Intersection over Union between word and segment."""
-    intersection = max(0.0, min(word_end, seg_end) - max(word_start, seg_start))
-    union = max(word_end, seg_end) - min(word_start, seg_start)
-    return intersection / union if union > 0 else 0.0
-
-
-def _assign_speaker_to_word(
+def _assign_word_to_turn(
     word_start: float,
     word_end: float,
     diarization: List[DiarizationSegment],
 ) -> str:
-    """Assign speaker to word based on max IoU or closest midpoint."""
+    """Assign a word to a diarization turn by MIDPOINT CONTAINMENT.
+
+    The pipeline contract is: words carry timestamps; diarization turns own
+    time intervals. A word belongs to the turn whose interval contains the
+    word's midpoint. Only if NO turn contains it do we fall back to the
+    nearest turn boundary. This is exact for well-formed diarization output;
+    IoU-based scoring is meaningless at this scale (a 0.3s word vs a 5s turn
+    yields IoU < 0.1 even for perfect alignment).
+    """
     if not diarization:
         return "UNKNOWN"
 
-    best_iou = 0.0
-    best_speaker = "UNKNOWN"
     word_mid = (word_start + word_end) / 2.0
-    min_dist = float("inf")
 
-    for seg in diarization:
-        iou = _compute_iou(word_start, word_end, seg.start, seg.end)
-        if iou > best_iou:
-            best_iou = iou
-            best_speaker = seg.speaker_id
+    # 1) Containment: prefer the turn that contains the midpoint. If turns
+    #    overlap, pick the one with the smallest duration (most specific).
+    containing = [
+        seg for seg in diarization
+        if seg.start <= word_mid <= seg.end
+    ]
+    if containing:
+        return min(containing, key=lambda s: s.end - s.start).speaker_id
 
-        seg_mid = (seg.start + seg.end) / 2.0
-        dist = abs(word_mid - seg_mid)
-        if dist < min_dist:
-            min_dist = dist
-            if best_iou == 0.0:
-                best_speaker = seg.speaker_id
+    # 2) Fallback: nearest boundary distance.
+    def _boundary_dist(seg: DiarizationSegment) -> float:
+        if word_mid < seg.start:
+            return seg.start - word_mid
+        if word_mid > seg.end:
+            return word_mid - seg.end
+        return 0.0
 
-    return best_speaker
+    return min(diarization, key=_boundary_dist).speaker_id
+
+
+
 
 
 def transcribe_audio(
@@ -147,7 +157,7 @@ def align_transcription_with_diarization(
         return []
 
     for word in words:
-        word.speaker_id = _assign_speaker_to_word(word.start, word.end, diarization)
+        word.speaker_id = _assign_word_to_turn(word.start, word.end, diarization)
 
     segments: List[TranscribedSegment] = []
     current_words: List[WordToken] = []

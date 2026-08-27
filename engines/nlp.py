@@ -19,6 +19,66 @@ BENGALI_TITLES = {
     "মন্ত্রী", "রাষ্ট্রপতি", "উপস্থাপক", "অতিথি", "সঞ্চালক",
 }
 
+# First-person self-introduction pattern: the strongest textual evidence
+# that <Name> is the person currently speaking (i.e. the host).
+#
+# NOTE on the capture strategy: a non-greedy quantifier with a whitespace
+# lookahead stops after TWO characters ("আমি রফতান..." -> "রফ"), so we
+# instead capture greedily up to end-of-text/punctuation and then trim with
+# a stopword list of common continuations ("আমি মনে করি...", "আমি কেউ নই").
+_HOST_ANCHOR_RE = re.compile(r"আমি\s+([\u0980-\u09FF][\u0980-\u09FF ]{1,60})")
+
+# Words that commonly follow "আমি" but are never part of a name.
+_POST_AMI_STOPWORDS = {
+    "মনে", "করি", "বলছি", "বলি", "ভাবছি", "ভাবি", "চাই", "জানি",
+    "বুঝি", "দেখি", "শুনছি", "কখনো", "কখনও", "একটা", "একজন", "কেউ",
+    "নই", "না", "ঠিক", "আসলে", "মানে", "তো", "যে", "এখন", "সবসময়",
+    "এই", "ওই", "সেই", "প্রথম", "শেষ", "আবার",
+}
+_MAX_NAME_WORDS = 4
+
+
+def extract_anchor_names_from_text(text: str) -> List[str]:
+    """Extract candidate self-introduced names from 'আমি <Name>' patterns.
+
+    Shared by engines/fusion.py (identity resolution) and
+    extract_intro_anchor below. Returns one cleaned name per anchor hit,
+    in order of appearance.
+    """
+    names: List[str] = []
+    for m in _HOST_ANCHOR_RE.finditer(text or ""):
+        words = m.group(1).split()
+        trimmed: List[str] = []
+        for w in words[:2 * _MAX_NAME_WORDS]:
+            if w in BENGALI_TITLES:        # titles precede names -- skip them
+                continue
+            if w in _POST_AMI_STOPWORDS:   # verb/adverb: the name has ended
+                break
+            trimmed.append(w)
+            if len(trimmed) >= _MAX_NAME_WORDS:
+                break
+        if trimmed:
+            names.append(" ".join(trimmed))
+    return names
+
+
+def extract_intro_anchor(segments: List[TranscribedSegment]) -> Optional[str]:
+    """Return the HOST's name from a first-person intro ('আমি <নাম>').
+
+    This is an explicit anchor, not a positional guess: whoever SAYS
+    'আমি X' is X. The name with the most anchor hits in the intro window wins.
+    Returns None when no anchor is found.
+    """
+    hits: dict = {}
+    for seg in segments:
+        if seg.start >= config.NLP_INTRO_SECONDS:
+            break
+        for name in extract_anchor_names_from_text(seg.text):
+            hits[name] = hits.get(name, 0) + 1
+    if not hits:
+        return None
+    return max(hits.items(), key=lambda kv: kv[1])[0]
+
 
 def _load_ner_pipeline() -> pipeline:
     """Load NER pipeline with fallback model."""
@@ -121,12 +181,16 @@ def _extract_names_from_entities(word_entities: List[Tuple[str, bool]]) -> List[
     return names
 
 
-def extract_speaker_names_from_intro(segments: List[TranscribedSegment]) -> List[str]:
+def extract_speaker_names_from_intro(
+    segments: List[TranscribedSegment],
+    ner_pipe: Optional[pipeline] = None,
+) -> List[str]:
     """
     Extract speaker names from introduction segments (first NLP_INTRO_SECONDS).
 
     Args:
         segments: List of TranscribedSegment from transcription engine.
+        ner_pipe: Optional pre-loaded NER pipeline (avoids reloading per call).
 
     Returns:
         Ordered list of unique person names found in intro.
@@ -138,7 +202,12 @@ def extract_speaker_names_from_intro(segments: List[TranscribedSegment]) -> List
     full_text = " ".join(s.text for s in intro_segments)
     normalized = _normalize_text(full_text)
 
-    ner_pipe = _load_ner_pipeline()
+    # Guard against empty/garbage intro text (e.g. all-special-token output).
+    if not normalized or not re.search(r"[\u0980-\u09FF]", normalized):
+        return []
+
+    if ner_pipe is None:
+        ner_pipe = _load_ner_pipeline()
 
     # Tokenize with offsets
     tokenizer = ner_pipe.tokenizer

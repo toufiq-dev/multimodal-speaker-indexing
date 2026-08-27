@@ -105,17 +105,22 @@ def run_pipeline(
     config.DATA_OUTPUT_DIR = out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[1/6] Extracting audio from {video.name}...")
+    print(f"[1/7] Extracting audio from {video.name}...")
     audio_path = extract_audio(str(video))
     print(f"    Audio saved to {audio_path}")
     torch.cuda.empty_cache()
 
-    print(f"[2/6] Running speaker diarization...")
-    diarization = run_diarization(audio_path)
+    print(f"[2/7] Running speaker diarization...")
+    try:
+        diarization = run_diarization(audio_path)
+    except Exception as e:
+        print(f"    Diarization failed ({e.__class__.__name__}), using single-speaker fallback")
+        from models import DiarizationSegment
+        diarization = [DiarizationSegment(0.0, 9999.0, "SPEAKER_00")]
     print(f"    Found {len(set(s.speaker_id for s in diarization))} speakers")
     torch.cuda.empty_cache()
 
-    print(f"[3/6] Transcribing audio...")
+    print(f"[3/7] Transcribing audio...")
     if use_lora:
         if not lora_path:
             raise ValueError("lora_path required when use_lora=True")
@@ -127,17 +132,17 @@ def run_pipeline(
     print(f"    Generated {len(transcribed)} transcribed segments")
     torch.cuda.empty_cache()
 
-    print(f"[4/6] Extracting frames...")
+    print(f"[4/7] Extracting frames...")
     frame_paths = extract_frames(str(video), fps=config.VISION_FPS)
     print(f"    Extracted {len(frame_paths)} frames")
     torch.cuda.empty_cache()
 
-    print(f"[5/6] Running vision pipeline...")
+    print(f"[5/7] Running vision pipeline...")
     faces = run_vision_pipeline(str(video), frame_paths=frame_paths)
     print(f"    Detected {len(faces)} face occurrences")
     torch.cuda.empty_cache()
 
-    print(f"[6/6] Extracting speaker names from intro...")
+    print(f"[6/7] Extracting speaker names from intro...")
     ordered_names = extract_speaker_names_from_intro(transcribed)
     print(f"    Found names: {ordered_names}")
     torch.cuda.empty_cache()
