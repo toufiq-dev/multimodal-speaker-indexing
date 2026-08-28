@@ -20,14 +20,14 @@ def _auto_device() -> str:
 
 
 def _resolve_base_dir() -> Path:
-    """Resolve base directory based on execution environment."""
+    """Resolve base directory based on execution environment (always absolute)."""
     # Check for Kaggle environment
     if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or os.environ.get("KAGGLE_URL_BASE"):
-        return Path("/kaggle/working")
+        return Path("/kaggle/working").resolve()
     # Check for Colab
     if os.environ.get("COLAB_RELEASE_TAG"):
-        return Path("/content")
-    return Path("./data")
+        return Path("/content").resolve()
+    return Path("./data").resolve()
 
 
 

@@ -2,6 +2,8 @@
 # Run this cell FIRST before any other cells
 
 import os
+# Enable hf-transfer Rust accelerator for 10× faster HF downloads (must be before huggingface import)
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 import sys
 import subprocess
 import warnings
@@ -49,6 +51,8 @@ def install_numpy():
 
 def install_requirements():
     """Install all requirements with versions compatible with Kaggle environment."""
+    # Enable hf-transfer for 10× faster gated model downloads (must be before huggingface_hub import)
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
     requirements = """
 # Audio Processing
 # CRITICAL: PyPI package is 'pyannote-audio' (hyphen), NOT 'pyannote.audio' (dot)
@@ -62,8 +66,9 @@ huggingface-hub==0.25.2
 tokenizers==0.19.1
 accelerate==0.33.0
 sentencepiece==0.2.0
+hf-transfer==0.1.9
 
-# Vision (InsightFace requires numpy<2.0)
+# Vision (InsightFace requires numpy<2.0 — numpy already installed first)
 insightface==0.7.3
 opencv-python-headless==4.10.0.84
 scikit-learn==1.5.1
@@ -73,9 +78,8 @@ scikit-image==0.24.0
 # onnxruntime-gpu only available on Linux; use onnxruntime on other platforms
 onnxruntime-gpu==1.19.2
 
-# Clustering & Metrics (numpy==1.26.4 CRITICAL for InsightFace compatibility)
+# Clustering & Metrics
 scipy==1.13.1
-numpy==1.26.4
 
 # Data Processing
 pandas==2.2.2
@@ -104,12 +108,16 @@ rich==13.9.4
 ipykernel==6.29.5
 jupyter-client==8.6.2
 
-# Download utilities
-yt-dlp==2026.8.19
+# Download utilities - pinned to existing PyPI version (avoid 2026 future 404)
+yt-dlp==2024.12.23
 
 # Evaluation
 jiwer==3.0.4
 pyannote.metrics==3.2.1
+
+# RAG (Chapter 6.3.1 extension only)
+sentence-transformers==3.3.1
+chromadb==0.5.15
 """
     
     # Write requirements to file
@@ -176,16 +184,36 @@ print("✅ NumPy compatibility patch applied")
 # ============================================================================
 
 def setup_hf_token():
-    """Load HF token from Kaggle Secrets."""
+    """Load HF token from Kaggle Secrets with fail-fast for gated models."""
+    hf_token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN") or ""
     try:
         from kaggle_secrets import UserSecretsClient
         user_secrets = UserSecretsClient()
-        hf_token = user_secrets.get_secret("HF_TOKEN")
-        os.environ["HF_TOKEN"] = hf_token
-        print("✅ Hugging Face token loaded from Kaggle Secrets")
+        # Try HF_TOKEN first, then HUGGING_FACE_HUB_TOKEN fallback
+        for key in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+            try:
+                tok = user_secrets.get_secret(key)
+                if tok and len(tok) > 20:
+                    hf_token = tok
+                    os.environ["HF_TOKEN"] = hf_token
+                    os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+                    print(f"✅ Hugging Face token loaded from Kaggle Secrets ({key})")
+                    break
+            except Exception:
+                continue
     except Exception as e:
         print(f"⚠️ Could not load HF_TOKEN from secrets: {e}")
-        print("   Make sure to add HF_TOKEN in Kaggle Secrets (left sidebar 🔒)")
+    if not hf_token or len(hf_token) < 20:
+        print("⚠️ HF_TOKEN missing or too short — gated pyannote/speaker-diarization-3.1 will fail with 401")
+        print("   Add HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) in Kaggle Secrets (left sidebar 🔒) and restart kernel")
+        # Do not raise hard — allow smoke tests, but pipeline will fail fast with clear message
+        if not hf_token:
+            hf_token = ""
+    else:
+        os.environ["HF_TOKEN"] = hf_token
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        print(f"✅ HF token ready (length {len(hf_token)})")
+    return hf_token
 
 setup_hf_token()
 
@@ -218,7 +246,7 @@ else:
 # ============================================================================
 
 def setup_repository():
-    """Clone the repository and setup Python paths."""
+    """Clone the repository and setup Python paths with Kaggle cache bust."""
     repo_url = "https://github.com/toufiq-dev/multimodal-speaker-indexing.git"
     repo_dir = "/kaggle/working/multimodal-speaker-indexing"
     
@@ -230,7 +258,7 @@ def setup_repository():
     
     # Clone fresh
     print("Cloning repository...")
-    result = subprocess.run(["git", "clone", repo_url], capture_output=True, text=True)
+    result = subprocess.run(["git", "clone", repo_url], capture_output=True, text=True, cwd="/kaggle/working")
     if result.returncode != 0:
         print(f"Error cloning: {result.stderr}")
         return False
@@ -239,8 +267,24 @@ def setup_repository():
     os.chdir(repo_dir)
     if repo_dir not in sys.path:
         sys.path.insert(0, repo_dir)
+    # Kaggle re-run safety: clear cached imports that froze old BASE_DIR
+    import importlib
+    for mod in list(sys.modules.keys()):
+        if mod == "config" or mod.startswith(("config.", "models", "engines")):
+            del sys.modules[mod]
+    importlib.invalidate_caches()
+    # Verify ffmpeg binary exists (not just python wrapper)
+    import shutil
+    if not shutil.which("ffmpeg"):
+        print("⚠️ ffmpeg binary not found — installing via apt (required for media extraction)")
+        subprocess.run(["apt", "update", "-qq"], capture_output=True)
+        subprocess.run(["apt", "install", "-y", "ffmpeg"], capture_output=True)
+    else:
+        print(f"✅ ffmpeg found: {shutil.which('ffmpeg')}")
+    if not shutil.which("ffprobe"):
+        print("⚠️ ffprobe missing (part of ffmpeg)")
     
-    print(f"✅ Repository cloned to {repo_dir}")
+    print(f"✅ Repository cloned to {repo_dir} (cache busted)")
     return True
 
 setup_repository()

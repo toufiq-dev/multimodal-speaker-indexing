@@ -46,8 +46,7 @@ def _restore_bengali_punct(text: str) -> str:
         words = text.split()
         mid = len(words) // 2
         text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
-    if config.ENABLE_PUNCTUATION_RESTORE:
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     return text.strip()
 
 

@@ -60,8 +60,7 @@ def _restore_bengali_punct(text: str) -> str:
         mid = len(words) // 2
         # try to split at a verb-like boundary; fallback to mid
         text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
-    if config.ENABLE_PUNCTUATION_RESTORE:
-        torch.cuda.empty_cache()
+    torch.cuda.empty_cache()
     return text.strip()
 
 

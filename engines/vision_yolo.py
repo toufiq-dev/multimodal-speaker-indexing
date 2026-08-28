@@ -14,11 +14,22 @@ remains in engines/fusion.py (P1 registry, P4 cluster).
 from __future__ import annotations
 
 import os
+import gc
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 import cv2
 import numpy as np
+# NumPy 2.0 patch for InsightFace ArcFace (same as vision.py)
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan  # type: ignore[attr-defined]
+if not hasattr(np, "Inf"):
+    np.Inf = np.inf  # type: ignore[attr-defined]
+if not hasattr(np, "PINF"):
+    np.PINF = np.inf  # type: ignore[attr-defined]
+if not hasattr(np, "NINF"):
+    np.NINF = -np.inf  # type: ignore[attr-defined]
+import torch
 from sklearn.cluster import DBSCAN, AgglomerativeClustering
 
 from config import config
@@ -124,6 +135,9 @@ def run_vision_yolo(video_path: str, frame_paths: Optional[List[str]] = None) ->
                 continue
             # YOLO inference (Ultralytics handles BGR internally, but works with cv2 BGR)
             results = yolo(frame, verbose=False)
+            if frame_idx % 100 == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
             if not results or len(results[0].boxes) == 0:
                 continue
             boxes = results[0].boxes
@@ -236,4 +250,6 @@ def run_vision_yolo(video_path: str, frame_paths: Optional[List[str]] = None) ->
                     embedding=occurrences[idx].embedding,
                 )
     occurrences.sort(key=lambda o: o.frame_time)
+    torch.cuda.empty_cache()
+    gc.collect()
     return occurrences

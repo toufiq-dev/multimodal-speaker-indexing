@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 import math
+import gc
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 import cv2
 import numpy as np
+# NumPy 2.0 ABI patch — InsightFace 0.7.3 still references np.NaN/np.Inf removed in NumPy 2.0
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan  # type: ignore[attr-defined]
+if not hasattr(np, "Inf"):
+    np.Inf = np.inf  # type: ignore[attr-defined]
+if not hasattr(np, "PINF"):
+    np.PINF = np.inf  # type: ignore[attr-defined]
+if not hasattr(np, "NINF"):
+    np.NINF = -np.inf  # type: ignore[attr-defined]
+
 import torch
 from insightface.app import FaceAnalysis
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
@@ -184,9 +195,16 @@ def _process_frames_with_vision(
 
             prev_faces = [(tuple(map(int, f.bbox)), f.embedding / np.linalg.norm(f.embedding), frame) for f in faces]
 
+            # Kaggle T4: periodic cache clear to prevent fragmentation over 2.7k frames
+            if frame_idx % 100 == 0:
+                torch.cuda.empty_cache()
+                gc.collect()
+
         except Exception:
             continue
 
+    torch.cuda.empty_cache()
+    gc.collect()
     return occurrences
 
 

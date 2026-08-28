@@ -5,6 +5,9 @@ torchaudio==2.5.1+cu121
 torchvision==0.20.1+cu121
 --index-url https://pypi.org/simple
 
+# NumPy FIRST — locks ABI for insightface, onnxruntime, tokenizers (must be before Vision)
+numpy==1.26.4
+
 # Audio Processing
 pyannote-audio==3.3.2
 faster-whisper==1.1.1
@@ -16,6 +19,7 @@ huggingface-hub==0.25.2
 tokenizers==0.19.1
 accelerate==0.33.0
 sentencepiece==0.2.0
+hf-transfer==0.1.9
 
 # Vision (InsightFace requires numpy<2.0)
 insightface==0.7.3
@@ -26,9 +30,8 @@ scikit-image==0.24.0
 # Face Analysis Dependencies
 onnxruntime-gpu==1.19.2
 
-# Clustering & Metrics (numpy<2.0 CRITICAL for InsightFace compatibility)
+# Clustering & Metrics
 scipy==1.13.1
-numpy==1.26.4
 
 # Data Processing
 pandas==2.2.2
@@ -57,9 +60,13 @@ rich==13.9.4
 ipykernel==6.29.5
 jupyter-client==8.6.2
 
-# Download utilities - USE STABLE VERSION
-yt-dlp==2026.8.19
+# Download utilities - pin to existing PyPI version (avoid future 404)
+yt-dlp==2024.12.23
 
 # Evaluation - FIXED: 3.3.2 doesn't exist, use 3.2.1
 pyannote.metrics==3.2.1
 jiwer==3.0.4
+
+# RAG (Chapter 6.3.1 extension only)
+sentence-transformers==3.3.1
+chromadb==0.5.15

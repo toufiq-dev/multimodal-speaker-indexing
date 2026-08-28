@@ -96,8 +96,10 @@ def _load_ner_pipeline() -> pipeline:
                 aggregation_strategy="simple",
                 device=0 if config.DEVICE == "cuda" else -1,
             )
+            torch.cuda.empty_cache()
             return ner_pipe
         except Exception:
+            torch.cuda.empty_cache()
             continue
 
     raise RuntimeError(f"Failed to load NER model: {model_name} or {fallback}")
