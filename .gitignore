@@ -65,3 +65,6 @@ kaggle.json
 dist/
 build/
 *.egg-info/
+
+# Claude
+CLAUDE.md
