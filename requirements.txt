@@ -1,9 +1,19 @@
+# Install with the NumPy ABI constraint applied:
+#   pip install -c constraints.txt -r requirements.txt
+#
+# Then run the ORT hygiene step (see kaggle_setup.py): chromadb hard-depends on
+# the CPU `onnxruntime` wheel, which shares onnxruntime-gpu's import path and
+# silently removes CUDAExecutionProvider.
+
 # Core ML Framework (CUDA 12.1)
---index-url https://download.pytorch.org/whl/cu121
+# --extra-index-url is ADDITIVE. `--index-url` is a global option in a
+# requirements file, so declaring it twice made the last one win for the whole
+# file and `torch==2.5.1+cu121` (a local version, never published to PyPI)
+# resolved against pypi.org and failed with "No matching distribution found".
+--extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.5.1+cu121
 torchaudio==2.5.1+cu121
 torchvision==0.20.1+cu121
---index-url https://pypi.org/simple
 
 # NumPy FIRST — locks ABI for insightface, onnxruntime, tokenizers (must be before Vision)
 numpy==1.26.4
@@ -11,6 +21,10 @@ numpy==1.26.4
 # Audio Processing
 pyannote-audio==3.3.2
 faster-whisper==1.1.1
+# Pinned explicitly: faster-whisper only requires >=4.0,<5, and CTranslate2
+# >=4.5 links cuDNN 9 while <=4.4 links cuDNN 8. torch cu121 ships cuDNN 9.1,
+# so an unpinned resolve can produce "Could not load library libcudnn_ops_infer.so.8".
+ctranslate2==4.5.0
 librosa==0.10.2.post1
 
 # Transformers & NLP
@@ -22,6 +36,9 @@ sentencepiece==0.2.0
 hf-transfer==0.1.9
 
 # Vision (InsightFace requires numpy<2.0)
+# insightface 0.7.3 is source-only and its setup.py imports Cython/NumPy, which
+# pip's build isolation does not provide. kaggle_setup.py installs it with
+# --no-build-isolation after seeding the build deps.
 insightface==0.7.3
 opencv-python-headless==4.10.0.84
 scikit-learn==1.5.1
@@ -29,6 +46,10 @@ scikit-image==0.24.0
 
 # Face Analysis Dependencies
 onnxruntime-gpu==1.19.2
+
+# YOLO-face ablation (engines/vision_yolo.py). Without it the ablation raises
+# rather than silently re-running RetinaFace as a fake second arm.
+ultralytics==8.3.49
 
 # Clustering & Metrics
 scipy==1.13.1
@@ -67,6 +88,6 @@ yt-dlp==2024.12.23
 pyannote.metrics==3.2.1
 jiwer==3.0.4
 
-# RAG (Chapter 6.3.1 extension only)
+# RAG (required post-pipeline stage; engines/rag.py)
 sentence-transformers==3.3.1
 chromadb==0.5.15

@@ -18,7 +18,7 @@ import hashlib
 import json
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -38,8 +38,8 @@ def _git_state() -> Dict[str, Optional[str]]:
 
 def _package_versions() -> Dict[str, str]:
     versions = {"python": sys.version.split()[0]}
-    for mod in ("torch", "transformers", "peft", "faster_whisper",
-                "pyannote.audio", "insightface"):
+    for mod in ("numpy", "torch", "transformers", "peft", "faster_whisper",
+                "ctranslate2", "onnxruntime", "pyannote.audio", "insightface"):
         try:
             versions[mod] = __import__(mod).__version__
         except Exception:
@@ -55,7 +55,7 @@ class ExperimentRun:
     metrics: Dict[str, Any] = field(default_factory=dict)
 
     started_at: str = field(default_factory=lambda:
-                            datetime.datetime.utcnow().isoformat() + "Z")
+                            datetime.datetime.now(datetime.timezone.utc).isoformat())
     finished_at: Optional[str] = None
     git: Dict[str, Optional[str]] = field(default_factory=_git_state)
     packages: Dict[str, str] = field(default_factory=_package_versions)
@@ -72,13 +72,14 @@ class ExperimentRun:
 
     def finish(self, metrics: Dict[str, Any]) -> None:
         self.metrics = _jsonable(metrics)
-        self.finished_at = datetime.datetime.utcnow().isoformat() + "Z"
+        self.finished_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     def save(self, out_dir: str | Path) -> Path:
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"run_{self.run_id}.json"
-        path.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2))
+        path.write_text(json.dumps(_jsonable(asdict(self)),
+                                   ensure_ascii=False, indent=2))
         return path
 
 

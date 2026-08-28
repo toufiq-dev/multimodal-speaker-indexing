@@ -12,10 +12,9 @@ import re
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
-import torch
-
 from config import config
 from models import FinalSegment
+from runtime import release_gpu_memory
 
 try:
     from sentence_transformers import SentenceTransformer  # type: ignore
@@ -103,8 +102,11 @@ class SpeakerAwareRAG:
         self._collection = None
         if _ST_AVAILABLE:
             try:
-                self._embedder = SentenceTransformer(embed_model, device="cuda" if config.DEVICE == "cuda" and torch.cuda.is_available() else "cpu")
-            except Exception:
+                self._embedder = SentenceTransformer(
+                    embed_model, device="cuda" if config.use_cuda() else "cpu")
+            except Exception as e:
+                print(f"[rag] embedder unavailable ({e.__class__.__name__}: {e}); "
+                      f"retrieval degrades to keyword overlap")
                 self._embedder = None
         if _CHROMA_AVAILABLE:
             try:
@@ -124,9 +126,8 @@ class SpeakerAwareRAG:
             # Fallback: dummy zero embeddings (keyword search fallback)
             import numpy as np
             return np.zeros((len(texts), 384), dtype=np.float32)
-        embs = self._embedder.encode(texts, normalize_embeddings=True, show_progress_bar=False)
-        torch.cuda.empty_cache()
-        return embs
+        return self._embedder.encode(
+            texts, normalize_embeddings=True, show_progress_bar=False)
 
     def ingest(self, segments: List[FinalSegment] | str | Path, collection_name: str = "talkshow") -> int:
         """Ingest from list of FinalSegment or path to result.json. Returns chunk count."""
@@ -153,7 +154,7 @@ class SpeakerAwareRAG:
                 ids = [f"chunk_{i}" for i in range(len(chunks))]
                 metadatas = [{"speaker": c["speaker"], "start_time": float(c["start_time"]), "end_time": float(c["end_time"]), "fusion_confidence": float(c["fusion_confidence"])} for c in chunks]
                 self._collection.add(ids=ids, documents=texts, embeddings=embs.tolist() if hasattr(embs, "tolist") else embs, metadatas=metadatas)
-                torch.cuda.empty_cache()
+                release_gpu_memory()
                 return len(chunks)
             except Exception:
                 pass
@@ -163,7 +164,7 @@ class SpeakerAwareRAG:
             self._fallback_embs = self._embed(texts)
         except Exception:
             self._fallback_embs = None
-        torch.cuda.empty_cache()
+        release_gpu_memory()
         return len(chunks)
 
     def query(self, question: str, speaker_filter: Optional[str] = None, k: int = 5) -> List[Dict]:
@@ -183,7 +184,6 @@ class SpeakerAwareRAG:
                     dists = res.get("distances", [[0]*len(docs)])[0]
                     for doc, meta, dist in zip(docs, metas, dists):
                         out.append({"text": doc, "speaker": meta.get("speaker"), "start_time": meta.get("start_time"), "end_time": meta.get("end_time"), "fusion_confidence": meta.get("fusion_confidence"), "score": 1 - float(dist) if dist is not None else 0.0, "citation": f"[{meta.get('start_time'):.1f}s–{meta.get('end_time'):.1f}s {meta.get('speaker')}]"})
-                torch.cuda.empty_cache()
                 return out
             except Exception:
                 pass
@@ -206,7 +206,6 @@ class SpeakerAwareRAG:
                 for i, s in scored[:k]:
                     c = self._fallback_chunks[i]
                     out.append({"text": c["text"], "speaker": c["speaker"], "start_time": c["start_time"], "end_time": c["end_time"], "fusion_confidence": c["fusion_confidence"], "score": s, "citation": f"[{c['start_time']:.1f}s–{c['end_time']:.1f}s {c['speaker']}]"})
-                torch.cuda.empty_cache()
                 return out
             except Exception:
                 pass
@@ -219,11 +218,11 @@ class SpeakerAwareRAG:
                 overlap *= 0.5
             scored.append((c, overlap))
         scored.sort(key=lambda x: -x[1])
-        torch.cuda.empty_cache()
         return [{"text": c["text"], "speaker": c["speaker"], "start_time": c["start_time"], "end_time": c["end_time"], "fusion_confidence": c["fusion_confidence"], "score": float(s), "citation": f"[{c['start_time']:.1f}s–{c['end_time']:.1f}s {c['speaker']}]"} for c, s in scored[:k]]
 
-    def close(self):
-        try:
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+    def close(self) -> None:
+        """Drop the embedder and return its device memory."""
+        self._embedder = None
+        self._collection = None
+        self._client = None
+        release_gpu_memory()

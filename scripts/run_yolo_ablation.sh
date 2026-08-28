@@ -11,24 +11,39 @@ from engines.vision_yolo import run_vision_yolo
 from config import config
 # Load cached faces? Here we re-run vision on cached frames (2,708 jpgs) — absolute for Kaggle /kaggle/working
 from config import config as _cfg
-# Resolve video/frames absolute: prefer /kaggle/working/data/... if exists (Kaggle), else repo data/
+# Frames now live under SCRATCH_DIR (/tmp on Kaggle), not the committed output
+# directory. Fall back to the legacy locations for previously cached runs.
 import os
+candidates = [
+    _cfg.SCRATCH_DIR / "frames",
+    _cfg.DATA_OUTPUT_DIR / "frames",
+    Path("/kaggle/working/data/output/frames"),
+    Path("data/output/frames"),
+]
 if Path("/kaggle/working/data/input/global_tv_talkshow.mp4").exists():
     video = "/kaggle/working/data/input/global_tv_talkshow.mp4"
-    frames = sorted(Path("/kaggle/working/data/output/frames").glob("frame_*.jpg"))
-    if not frames:
-        frames = sorted(Path("/kaggle/working/multimodal-speaker-indexing/data/output/frames").glob("frame_*.jpg"))
 else:
-    video="data/input/global_tv_talkshow.mp4"
-    frames=sorted(Path("data/output/frames").glob("frame_*.jpg"))
-    # fallback to config output dir if empty
-    if not frames:
-        frames=sorted((_cfg.DATA_OUTPUT_DIR / "frames").glob("frame_*.jpg"))
+    video = "data/input/global_tv_talkshow.mp4"
+
+frames = []
+for c in candidates:
+    frames = sorted(c.glob("frame_*.jpg"))
+    if frames:
+        print(f"using cached frames from {c}")
+        break
+if not frames:
+    from engines.media import extract_frames
+    frames = [Path(f) for f in extract_frames(video, fps=_cfg.VISION_FPS)]
 frames=[str(p) for p in frames]
+# The YOLO arm now RAISES if ultralytics or the weights are missing, instead of
+# silently re-running RetinaFace and reporting two identical arms.
 for detector in ["insightface", "yolo"]:
     config.VISION_DETECTOR=detector
-    config.YOLO_MODEL="yolov8n-face.pt" if detector=="yolo" else "yolov8n-face.pt"
-    faces = run_vision_yolo(video, frames) if detector=="yolo" else run_vision_pipeline(video, frames)
-    print(detector, len(faces), set(f.resolved_face_id for f in faces))
+    try:
+        faces = run_vision_yolo(video, frames) if detector=="yolo" else run_vision_pipeline(video, frames)
+    except RuntimeError as e:
+        print(f"{detector}: SKIPPED — {e}")
+        continue
+    print(detector, len(faces), sorted(set(f.resolved_face_id for f in faces)))
 PY
 echo "✓ YOLO ablation done — check evaluation/metrics face_attribution"

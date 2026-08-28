@@ -51,7 +51,9 @@ def extract_audio(video_path: str) -> str:
     if not video.exists():
         raise FileNotFoundError(f"Video file not found: {video}")
 
-    output_dir = config.DATA_OUTPUT_DIR / "audio"
+    # Scratch, not output: on Kaggle DATA_OUTPUT_DIR is committed as notebook
+    # output, and a 53-minute WAV at 16 kHz is ~100 MB of dead weight there.
+    output_dir = config.SCRATCH_DIR / "audio"
     _ensure_dir(output_dir)
 
     output_path = output_dir / f"{video.stem}.wav"
@@ -96,8 +98,14 @@ def extract_frames(video_path: str, fps: int = 1) -> List[str]:
     if not video.exists():
         raise FileNotFoundError(f"Video file not found: {video}")
 
-    output_dir = config.DATA_OUTPUT_DIR / "frames"
+    # Scratch, not output: ~3k JPEGs for a 53-minute show at 1 FPS.
+    output_dir = config.SCRATCH_DIR / "frames"
     _ensure_dir(output_dir)
+
+    # Stale frames from a previous, longer video would otherwise be picked up
+    # by the glob below and silently attributed to this run's timeline.
+    for stale in output_dir.glob("frame_*.jpg"):
+        stale.unlink(missing_ok=True)
 
     output_pattern = output_dir / "frame_%06d.jpg"
 
@@ -118,4 +126,9 @@ def extract_frames(video_path: str, fps: int = 1) -> List[str]:
         raise
 
     frames = sorted(output_dir.glob("frame_*.jpg"))
+    if not frames:
+        raise RuntimeError(
+            f"ffmpeg reported success but produced no frames in {output_dir}. "
+            f"Check that {video.name} contains a video stream."
+        )
     return [str(f.resolve()) for f in frames]

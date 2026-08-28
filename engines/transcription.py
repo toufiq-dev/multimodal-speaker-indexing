@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import torch
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -11,16 +10,44 @@ from faster_whisper import WhisperModel
 
 from config import config
 from models import DiarizationSegment, TranscribedSegment, WordToken
+from runtime import release_gpu_memory, with_model
 
 
 def _load_model() -> WhisperModel:
-    """Load faster-whisper model with appropriate compute type."""
+    """Load faster-whisper model with appropriate compute type.
+
+    Two preconditions are checked eagerly, because both fail later in ways
+    that are hard to read:
+
+    1. faster-whisper requires a CTranslate2 directory (``model.bin`` plus a
+       CT2 ``config.json``), NOT a Transformers checkpoint. A partially
+       populated CT2 directory — e.g. one whose ``model.bin`` was excluded by
+       ``.gitignore`` and so never reached the Kaggle clone — fails with an
+       opaque loader error.
+    2. If the checkpoint was converted as English-only, faster-whisper does
+       not reject ``language="bn"``: it logs a warning and forces ``"en"``,
+       transcribing Bangla through an English decoder. That silent downgrade
+       is far worse than a crash for a Bangla ASR benchmark.
+    """
     device, compute_type = config.fw_device_and_compute()
-    model = WhisperModel(
-        config.WHISPER_MODEL,
-        device=device,
-        compute_type=compute_type,
-    )
+    name = str(config.WHISPER_MODEL)
+
+    local = Path(name)
+    if local.is_dir() and not (local / "model.bin").exists():
+        raise RuntimeError(
+            f"{local} looks like a CTranslate2 directory but has no model.bin. "
+            f"Run scripts/convert_bengali_ct2.sh and point WHISPER_MODEL at its "
+            f"--output_dir (weights are gitignored, so a clone never carries them)."
+        )
+
+    model = WhisperModel(name, device=device, compute_type=compute_type)
+
+    if not model.model.is_multilingual:
+        raise RuntimeError(
+            f"{name} was converted as English-only; language='bn' would be "
+            f"silently downgraded to 'en'. Re-convert with the multilingual "
+            f"tokenizer (ct2-transformers-converter --copy_files tokenizer.json)."
+        )
     return model
 
 
@@ -43,9 +70,14 @@ def _restore_bengali_punct(text: str) -> str:
     Whisper emits unpunctuated Bengali (no ।/,). Heuristics:
     - Normalize existing dandas/commas spacing
     - If long (>18 words) and no danda, insert one after first clause to aid NER
-    Gated by config.ENABLE_PUNCTUATION_RESTORE; safe to call even when disabled
-    if text already has punctuation it is only normalized.
+
+    Genuinely gated by ``config.ENABLE_PUNCTUATION_RESTORE``. The flag used to
+    be dead configuration while this function ran unconditionally — which
+    meant a synthetic danda was inserted into every long segment before
+    WER/CER scoring, with no way to run the ablation without it.
     """
+    if not config.ENABLE_PUNCTUATION_RESTORE:
+        return text
     if not text:
         return text
     if not re.search(r"[\u0980-\u09FF]", text):
@@ -60,7 +92,6 @@ def _restore_bengali_punct(text: str) -> str:
         mid = len(words) // 2
         # try to split at a verb-like boundary; fallback to mid
         text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
-    torch.cuda.empty_cache()
     return text.strip()
 
 
@@ -126,20 +157,20 @@ def transcribe_audio(
 
     local_model = model or _load_model()
 
-    try:
-        segments, _ = local_model.transcribe(
-            str(audio),
-            word_timestamps=True,
-            vad_filter=True,
-            language="bn",
-        )
-    except Exception:
-        segments, _ = local_model.transcribe(
-            str(audio),
-            word_timestamps=True,
-            vad_filter=True,
-            language=None,
-        )
+    # NOTE: transcribe() returns a generator. Only the eager setup (audio
+    # decode, VAD, language validation) can raise here; decoding errors
+    # surface while iterating below. The previous blanket retry with
+    # language=None therefore never fired for the failures it was meant to
+    # cover, and would have masked a wrong-language model if it had.
+    segments, info = local_model.transcribe(
+        str(audio),
+        word_timestamps=True,
+        vad_filter=True,
+        language="bn",
+    )
+
+    print(f"[transcription] language={info.language} "
+          f"(p={info.language_probability:.2f}) duration={info.duration:.1f}s")
 
     words: List[WordToken] = []
     full_text_parts = []
@@ -157,8 +188,12 @@ def transcribe_audio(
 
     full_text = " ".join(full_text_parts).strip()
 
+    if not words:
+        print("[transcription] WARNING: no word timestamps produced; fusion "
+              "will fall back to proportional text splitting.")
+
     if model is None:
-        torch.cuda.empty_cache()
+        release_gpu_memory()
     return words, full_text
 
 
@@ -176,11 +211,17 @@ def align_transcription_with_diarization(
     Returns:
         List of TranscribedSegment with speaker assignments.
     """
-    model = _load_model()
-    words, _ = transcribe_audio(audio_path, model=model)
+    # Scope the model: CTranslate2 allocates outside torch's caching allocator,
+    # so its VRAM is reclaimed only when the object itself is collected.
+    # Calling empty_cache() while `model` was still in scope (the old code)
+    # freed nothing at all.
+    words, _ = with_model(
+        _load_model,
+        lambda model: transcribe_audio(audio_path, model=model),
+        "faster-whisper",
+    )
 
     if not words:
-        torch.cuda.empty_cache()
         return []
 
     for word in words:
@@ -224,5 +265,4 @@ def align_transcription_with_diarization(
             )
         )
 
-    torch.cuda.empty_cache()
     return segments

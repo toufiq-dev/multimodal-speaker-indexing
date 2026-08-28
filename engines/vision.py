@@ -2,31 +2,34 @@
 
 from __future__ import annotations
 
-import os
-import math
-import gc
-from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 
 import cv2
 import numpy as np
-# NumPy 2.0 ABI patch — InsightFace 0.7.3 still references np.NaN/np.Inf removed in NumPy 2.0
-if not hasattr(np, "NaN"):
-    np.NaN = np.nan  # type: ignore[attr-defined]
-if not hasattr(np, "Inf"):
-    np.Inf = np.inf  # type: ignore[attr-defined]
-if not hasattr(np, "PINF"):
-    np.PINF = np.inf  # type: ignore[attr-defined]
-if not hasattr(np, "NINF"):
-    np.NINF = -np.inf  # type: ignore[attr-defined]
 
-import torch
-from insightface.app import FaceAnalysis
-from sklearn.cluster import AgglomerativeClustering, DBSCAN
-
+# config applies the NumPy ABI lock + compat aliases at import time (see
+# runtime.apply_numpy_compat) and must therefore be imported before
+# insightface, whose wheels are built against the NumPy 1.x C ABI.
 from config import config
+from runtime import (
+    assert_cuda_execution_provider,
+    assert_numpy_abi,
+    release_gpu_memory,
+)
+
+# insightface/onnxruntime wheels are built against the NumPy 1.x C ABI.
+assert_numpy_abi()
+
+from insightface.app import FaceAnalysis
+
 from models import FaceOccurrence
 from engines.media import extract_frames
+from engines.clustering import NOISE_LABEL, cluster_face_embeddings
+
+#: Abort rather than hand fusion a decimated view of the video. Isolated
+#: unreadable frames are normal; a systemic failure (wrong provider, corrupt
+#: JPEGs, OOM) is not, and used to surface only as "Detected 0 face occurrences".
+MAX_FRAME_FAILURE_RATE = 0.10
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -52,11 +55,34 @@ def _bbox_iou(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int]) 
     return intersection / union if union > 0 else 0.0
 
 
+def _clamp_box(box: Tuple[int, int, int, int],
+               frame: np.ndarray) -> Tuple[int, int, int, int]:
+    """Clip a detector bbox to the frame.
+
+    InsightFace emits boxes that run off the edge, and negative coordinates do
+    NOT raise under NumPy slicing — ``frame[-10:50, -20:30]`` silently yields
+    an empty (0, 0) array, so an out-of-frame face reads as "no mouth motion"
+    rather than as an error.
+    """
+    h, w = frame.shape[:2]
+    x1, y1, x2, y2 = box
+    x1 = max(0, min(int(x1), w))
+    y1 = max(0, min(int(y1), h))
+    x2 = max(x1, min(int(x2), w))
+    y2 = max(y1, min(int(y2), h))
+    return x1, y1, x2, y2
+
+
 def _mouth_region_diff(box1: Tuple[int, int, int, int], box2: Tuple[int, int, int, int],
                        frame1: np.ndarray, frame2: np.ndarray) -> float:
-    """Compute normalized absolute pixel difference in mouth region (lower half of bbox)."""
-    x1_1, y1_1, x2_1, y2_1 = box1
-    x1_2, y1_2, x2_2, y2_2 = box2
+    """Normalized absolute pixel difference in the mouth region (lower bbox half).
+
+    Diagnostic only: at VISION_FPS=1 the two frames are a full second apart,
+    far above phoneme rate, so this is a coarse motion proxy and NOT a
+    lip-sync signal. engines/fusion.py deliberately does not consume it.
+    """
+    x1_1, y1_1, x2_1, y2_1 = _clamp_box(box1, frame1)
+    x1_2, y1_2, x2_2, y2_2 = _clamp_box(box2, frame2)
 
     mouth_y1_1 = y1_1 + (y2_1 - y1_1) // 2
     mouth_y2_1 = y2_1
@@ -91,25 +117,36 @@ def _mouth_region_diff(box1: Tuple[int, int, int, int], box2: Tuple[int, int, in
 
 
 def _load_registry_embeddings(app: FaceAnalysis) -> Dict[str, Tuple[np.ndarray, int]]:
-    """Load face embeddings from registry images. Returns {name: (embedding, index)}."""
+    """Load face embeddings from registry images. Returns {name: (embedding, index)}.
+
+    Failures are reported rather than swallowed: with a three-photo registry,
+    one silently skipped image removes a third of the P1 identity evidence and
+    the pipeline degrades all the way to generic Speaker_N labels with no
+    indication of why.
+    """
     registry: Dict[str, Tuple[np.ndarray, int]] = {}
     registry_dir = config.DATA_REGISTRY_DIR
 
     if not registry_dir.exists():
+        print(f"[vision] registry directory {registry_dir} does not exist — "
+              f"P1 registry identification disabled")
         return registry
 
     image_files: list = []
     for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
         image_files.extend(sorted(registry_dir.glob(ext)))
     image_files.sort(key=lambda p: p.name)
+    skipped: List[str] = []
     for idx, img_path in enumerate(image_files):
         try:
             img = cv2.imread(str(img_path))
             if img is None:
+                skipped.append(f"{img_path.name} (unreadable)")
                 continue
 
             faces = app.get(img)
             if not faces:
+                skipped.append(f"{img_path.name} (no face detected)")
                 continue
 
             largest_face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
@@ -117,9 +154,19 @@ def _load_registry_embeddings(app: FaceAnalysis) -> Dict[str, Tuple[np.ndarray, 
 
             name = img_path.stem.replace("_", " ")
             registry[name] = (embedding, idx)
-        except Exception:
-            continue
+        except Exception as e:
+            skipped.append(f"{img_path.name} ({e.__class__.__name__}: {e})")
 
+    if skipped:
+        print(f"[vision] registry: skipped {len(skipped)}/{len(image_files)} "
+              f"image(s): {'; '.join(skipped)}")
+    if image_files and not registry:
+        raise RuntimeError(
+            f"{len(image_files)} registry image(s) in {registry_dir} but not one "
+            f"usable embedding — every face would resolve to Speaker_N. "
+            f"Check the photos are frontal and that ArcFace loaded."
+        )
+    print(f"[vision] registry loaded: {sorted(registry)}")
     return registry
 
 
@@ -131,6 +178,7 @@ def _process_frames_with_vision(
     """Process all frames, detect faces, compute lip-sync, match to registry."""
     occurrences: List[FaceOccurrence] = []
     prev_faces: List[Tuple[Tuple[int, int, int, int], np.ndarray, np.ndarray]] = []  # (box, embedding, frame)
+    failures: List[str] = []
 
     for frame_idx, frame_path in enumerate(frame_paths):
         # Frames are extracted at t=0, 1/fps, 2/fps ... so frame i sits at
@@ -141,6 +189,7 @@ def _process_frames_with_vision(
         try:
             frame = cv2.imread(frame_path)
             if frame is None:
+                failures.append(f"{frame_idx}: unreadable")
                 continue
 
             faces = app.get(frame)
@@ -149,7 +198,7 @@ def _process_frames_with_vision(
                 continue
 
             for face in faces:
-                box = tuple(map(int, face.bbox))
+                box = _clamp_box(tuple(map(int, face.bbox)), frame)
                 embedding = face.embedding / np.linalg.norm(face.embedding)
 
                 best_name = "UNKNOWN"
@@ -193,25 +242,44 @@ def _process_frames_with_vision(
                     embedding=embedding if best_name == "UNKNOWN" else None,
                 ))
 
-            prev_faces = [(tuple(map(int, f.bbox)), f.embedding / np.linalg.norm(f.embedding), frame) for f in faces]
+            prev_faces = [(_clamp_box(tuple(map(int, f.bbox)), frame),
+                           f.embedding / np.linalg.norm(f.embedding), frame)
+                          for f in faces]
 
-            # Kaggle T4: periodic cache clear to prevent fragmentation over 2.7k frames
-            if frame_idx % 100 == 0:
-                torch.cuda.empty_cache()
-                gc.collect()
+            # Kaggle T4: periodic reclaim to limit fragmentation over ~2.7k frames.
+            if frame_idx % 500 == 0:
+                release_gpu_memory()
 
-        except Exception:
+        except Exception as e:
+            failures.append(f"{frame_idx}: {e.__class__.__name__}: {e}")
             continue
 
-    torch.cuda.empty_cache()
-    gc.collect()
+    if failures:
+        rate = len(failures) / max(len(frame_paths), 1)
+        print(f"[vision] {len(failures)}/{len(frame_paths)} frames failed "
+              f"({rate:.1%}); first: {failures[:3]}")
+        if rate > MAX_FRAME_FAILURE_RATE:
+            raise RuntimeError(
+                f"{rate:.1%} of frames failed (limit {MAX_FRAME_FAILURE_RATE:.0%}). "
+                f"Refusing to emit partial vision evidence into fusion — the "
+                f"identity cascade cannot distinguish 'absent' from 'not looked at'. "
+                f"First failures: {failures[:5]}"
+            )
+
+    release_gpu_memory()
     return occurrences
 
 
 def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurrence]:
-    """Cluster UNKNOWN face embeddings: Agglomerative (with NUM_SPEAKERS hint) or DBSCAN fallback."""
-    unknown_indices = []
-    unknown_embeddings = []
+    """Label UNKNOWN faces with identity clusters (P4 evidence for fusion).
+
+    Delegates to engines.clustering, which bounds the fit set so the dense
+    n x n distance matrix cannot exhaust host RAM on a full-length show, and
+    which is shared verbatim with the YOLO ablation so the two detector arms
+    differ only in detection.
+    """
+    unknown_indices: List[int] = []
+    unknown_embeddings: List[np.ndarray] = []
 
     for idx, occ in enumerate(occurrences):
         if occ.resolved_face_id == "UNKNOWN" and occ.embedding is not None:
@@ -219,58 +287,59 @@ def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurr
             unknown_embeddings.append(occ.embedding)
 
     if len(unknown_embeddings) < config.DBSCAN_MIN_SAMPLES:
-        torch.cuda.empty_cache()
         return occurrences
 
-    embeddings_array = np.array(unknown_embeddings)
-    # Count already-resolved registry identities to estimate remaining speakers
-    try:
-        registry_names = {o.resolved_face_id for o in occurrences if o.resolved_face_id not in ("UNKNOWN", "face_cluster_noise") and not o.resolved_face_id.startswith("face_cluster_")}
-        n_registry = len(registry_names)
-        use_agg = (config.CLUSTERING == "agglomerative" and config.NUM_SPEAKERS is not None)
-        if use_agg:
-            n_clusters = max(1, int(config.NUM_SPEAKERS) - n_registry)
-            n_clusters = min(n_clusters, len(unknown_embeddings))
-            if n_clusters >= 2:
-                clustering = AgglomerativeClustering(n_clusters=n_clusters, metric="cosine", linkage="average")
-                labels = clustering.fit_predict(embeddings_array)
-            else:
-                labels = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine").fit(embeddings_array).labels_
+    # Agglomerative needs a cluster count: the speakers not already pinned to a
+    # registry identity. Requires the NUM_SPEAKERS hint; without it, DBSCAN.
+    registry_names = {
+        o.resolved_face_id for o in occurrences
+        if o.resolved_face_id != "UNKNOWN"
+        and not o.resolved_face_id.startswith("face_cluster_")
+    }
+    algorithm = config.CLUSTERING
+    n_clusters: Optional[int] = None
+    if algorithm == "agglomerative":
+        if config.NUM_SPEAKERS:
+            n_clusters = max(1, int(config.NUM_SPEAKERS) - len(registry_names))
         else:
-            clustering = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine")
-            labels = clustering.fit(embeddings_array).labels_
-    except Exception:
-        try:
-            clustering = DBSCAN(eps=config.DBSCAN_EPS, min_samples=config.DBSCAN_MIN_SAMPLES, metric="cosine")
-            labels = clustering.fit(embeddings_array).labels_
-        except Exception:
-            torch.cuda.empty_cache()
-            return occurrences
-    finally:
-        torch.cuda.empty_cache()
+            print("[vision] CLUSTERING=agglomerative needs NUM_SPEAKERS; "
+                  "falling back to DBSCAN")
+            algorithm = "dbscan"
+
+    try:
+        labels = cluster_face_embeddings(
+            np.asarray(unknown_embeddings),
+            algorithm=algorithm,
+            n_clusters=n_clusters,
+            eps=config.DBSCAN_EPS,
+            min_samples=config.DBSCAN_MIN_SAMPLES,
+        )
+    except MemoryError as e:
+        raise RuntimeError(
+            f"Face clustering ran out of memory on {len(unknown_embeddings)} "
+            f"embeddings. Lower engines.clustering.MAX_FIT_SAMPLES or reduce "
+            f"VISION_FPS."
+        ) from e
+
+    n_clustered = len({int(l) for l in labels if l >= 0})
+    n_noise = int(sum(1 for l in labels if l < 0))
+    print(f"[vision] clustered {len(unknown_embeddings)} unknown faces into "
+          f"{n_clustered} identities ({n_noise} noise) via {algorithm}")
 
     for idx, label in zip(unknown_indices, labels):
-        if label >= 0:
-            occurrences[idx] = FaceOccurrence(
-                frame_time=occurrences[idx].frame_time,
-                box=occurrences[idx].box,
-                track_id=label,
-                resolved_face_id=f"face_cluster_{label}",
-                face_confidence=occurrences[idx].face_confidence,
-                lip_sync_score=occurrences[idx].lip_sync_score,
-                embedding=occurrences[idx].embedding,
-            )
-        else:
-            occurrences[idx] = FaceOccurrence(
-                frame_time=occurrences[idx].frame_time,
-                box=occurrences[idx].box,
-                track_id=-1,
-                resolved_face_id="face_cluster_noise",
-                face_confidence=occurrences[idx].face_confidence,
-                lip_sync_score=occurrences[idx].lip_sync_score,
-                embedding=occurrences[idx].embedding,
-            )
+        label = int(label)
+        is_noise = label == NOISE_LABEL
+        occurrences[idx] = FaceOccurrence(
+            frame_time=occurrences[idx].frame_time,
+            box=occurrences[idx].box,
+            track_id=NOISE_LABEL if is_noise else label,
+            resolved_face_id="face_cluster_noise" if is_noise else f"face_cluster_{label}",
+            face_confidence=occurrences[idx].face_confidence,
+            lip_sync_score=occurrences[idx].lip_sync_score,
+            embedding=occurrences[idx].embedding,
+        )
 
+    release_gpu_memory()
     return occurrences
 
 
@@ -285,20 +354,31 @@ def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None
     Returns:
         List of FaceOccurrence sorted by frame_time.
     """
+    # Requesting the CUDA EP is not the same as getting it: ORT falls back to
+    # CPU without raising, which turns a GPU run into a silent ~20x slowdown.
+    if config.use_cuda():
+        assert_cuda_execution_provider()
+
     app = FaceAnalysis(
-        providers=['CUDAExecutionProvider', 'CPUExecutionProvider'],
+        providers=config.onnx_providers(),
         allowed_modules=['detection', 'recognition'],
     )
     # ctx_id=-1 forces CPU (onnxruntime has no MPS provider on macOS).
-    app.prepare(ctx_id=0 if config.DEVICE == "cuda" else -1, det_size=(640, 640))
+    app.prepare(ctx_id=config.onnx_ctx_id(), det_size=(640, 640))
 
     registry = _load_registry_embeddings(app)
 
     if frame_paths is None:
         frame_paths = extract_frames(video_path, fps=config.VISION_FPS)
 
-    occurrences = _process_frames_with_vision(frame_paths, registry, app)
-    occurrences = _cluster_unknown_faces(occurrences)
-    occurrences.sort(key=lambda o: o.frame_time)
+    try:
+        occurrences = _process_frames_with_vision(frame_paths, registry, app)
+        occurrences = _cluster_unknown_faces(occurrences)
+    finally:
+        # ONNX Runtime device memory is invisible to torch's allocator; only
+        # dropping the session returns it.
+        del app
+        release_gpu_memory()
 
+    occurrences.sort(key=lambda o: o.frame_time)
     return occurrences

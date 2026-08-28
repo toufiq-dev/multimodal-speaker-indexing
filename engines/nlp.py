@@ -5,11 +5,11 @@ from __future__ import annotations
 import re
 from typing import List, Tuple, Optional
 
-import torch
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 
 from config import config
 from models import TranscribedSegment
+from runtime import release_gpu_memory
 
 
 BENGALI_TITLES = {
@@ -36,6 +36,13 @@ _POST_AMI_STOPWORDS = {
     "এই", "ওই", "সেই", "প্রথম", "শেষ", "আবার",
 }
 _MAX_NAME_WORDS = 4
+
+#: NER window size in characters. TokenClassificationPipeline truncates to the
+#: tokenizer's model_max_length (512 subwords) WITHOUT warning, so a 120-second
+#: intro — roughly 300 Bangla words, 600-900 BanglaBERT subwords — silently
+#: lost its back half, exactly where guests are introduced. ~1200 chars keeps a
+#: window comfortably under 512 subwords for Bangla script.
+_NER_WINDOW_CHARS = 1200
 
 
 def extract_anchor_names_from_text(text: str) -> List[str]:
@@ -84,6 +91,7 @@ def _load_ner_pipeline() -> pipeline:
     """Load NER pipeline with fallback model."""
     model_name = config.BANGLABERT_NER_MODEL
     fallback = config.BANGLABERT_NER_FALLBACK
+    errors: List[str] = []
 
     for name in (model_name, fallback):
         try:
@@ -94,15 +102,47 @@ def _load_ner_pipeline() -> pipeline:
                 model=model,
                 tokenizer=tokenizer,
                 aggregation_strategy="simple",
-                device=0 if config.DEVICE == "cuda" else -1,
+                device=0 if config.use_cuda() else -1,
             )
-            torch.cuda.empty_cache()
             return ner_pipe
-        except Exception:
-            torch.cuda.empty_cache()
+        except Exception as e:
+            errors.append(f"{name}: {e.__class__.__name__}: {e}")
+            release_gpu_memory()
             continue
 
-    raise RuntimeError(f"Failed to load NER model: {model_name} or {fallback}")
+    raise RuntimeError(
+        f"Failed to load NER model. Tried {model_name} then {fallback}: "
+        + " | ".join(errors)
+    )
+
+
+def _split_windows(text: str, max_chars: int = _NER_WINDOW_CHARS) -> List[Tuple[int, str]]:
+    """Split text into <=max_chars windows at sentence boundaries.
+
+    Returns (char_offset, window) so entity spans can be rebased onto the
+    original string. Cutting on danda/period boundaries rather than a raw
+    character count avoids slicing a name in half across two windows.
+    """
+    if len(text) <= max_chars:
+        return [(0, text)]
+
+    windows: List[Tuple[int, str]] = []
+    start = 0
+    while start < len(text):
+        if len(text) - start <= max_chars:
+            windows.append((start, text[start:]))
+            break
+        cut = max(text.rfind("।", start, start + max_chars),
+                  text.rfind(".", start, start + max_chars))
+        if cut <= start:
+            cut = text.rfind(" ", start, start + max_chars)
+        if cut <= start:
+            cut = start + max_chars
+        else:
+            cut += 1
+        windows.append((start, text[start:cut]))
+        start = cut
+    return windows
 
 
 def _normalize_text(text: str) -> str:
@@ -211,23 +251,34 @@ def extract_speaker_names_from_intro(
     if ner_pipe is None:
         ner_pipe = _load_ner_pipeline()
 
-    # Tokenize with offsets
     tokenizer = ner_pipe.tokenizer
-    encoding = tokenizer(
-        normalized,
-        return_offsets_mapping=True,
-        return_tensors="pt",
-        truncation=True,
-        max_length=512,
-    )
 
-    tokens = tokenizer.convert_ids_to_tokens(encoding["input_ids"][0])
-    offsets = encoding["offset_mapping"][0].tolist()
+    # Window the intro instead of feeding it whole: the pipeline truncates to
+    # 512 subwords silently, which discarded the tail of the introduction.
+    # Token offsets and entity spans are rebased onto the full string so the
+    # downstream subword->word mapping is unchanged.
+    tokens: List[str] = []
+    offsets: List[Tuple[int, int]] = []
+    entities: List[dict] = []
 
-    # Run NER
-    entities = ner_pipe(normalized)
+    for base, window in _split_windows(normalized):
+        encoding = tokenizer(
+            window,
+            return_offsets_mapping=True,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
+        )
+        tokens.extend(tokenizer.convert_ids_to_tokens(encoding["input_ids"][0]))
+        for start, end in encoding["offset_mapping"][0].tolist():
+            # (0, 0) marks a special token; keep it degenerate so the mapper
+            # skips it rather than treating `base` as a real character offset.
+            offsets.append((0, 0) if end <= start else (start + base, end + base))
+        for ent in ner_pipe(window):
+            entities.append({**ent,
+                             "start": ent["start"] + base,
+                             "end": ent["end"] + base})
 
-    # Map to words
     word_entities = _map_subwords_to_words(tokens, offsets, entities)
 
     # Extract names

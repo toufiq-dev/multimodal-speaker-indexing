@@ -9,6 +9,20 @@ from typing import ClassVar, Optional
 
 import torch
 
+from runtime import (
+    apply_numpy_compat,
+    ensure_cudnn_on_path,
+    onnx_providers,
+)
+
+# Establish the process invariants before any engine imports insightface,
+# onnxruntime or ctranslate2. config is imported first by every engine, so
+# this is the earliest deterministic hook available. The hard NumPy ABI
+# assertion is deferred to runtime.assert_numpy_abi(), invoked by the vision
+# modules — the audio/fusion/evaluation paths are ABI-independent.
+apply_numpy_compat()
+ensure_cudnn_on_path()
+
 
 def _auto_device() -> str:
     """Auto-detect the best available device for PyTorch."""
@@ -19,15 +33,35 @@ def _auto_device() -> str:
     return "cpu"
 
 
+def _is_kaggle() -> bool:
+    return bool(os.environ.get("KAGGLE_KERNEL_RUN_TYPE")
+                or os.environ.get("KAGGLE_URL_BASE"))
+
+
 def _resolve_base_dir() -> Path:
     """Resolve base directory based on execution environment (always absolute)."""
-    # Check for Kaggle environment
-    if os.environ.get("KAGGLE_KERNEL_RUN_TYPE") or os.environ.get("KAGGLE_URL_BASE"):
+    if _is_kaggle():
         return Path("/kaggle/working").resolve()
     # Check for Colab
     if os.environ.get("COLAB_RELEASE_TAG"):
         return Path("/content").resolve()
     return Path("./data").resolve()
+
+
+def _resolve_scratch_dir() -> Path:
+    """Resolve the directory for large, disposable intermediates.
+
+    Frames and extracted audio must NOT live under BASE_DIR on Kaggle:
+    /kaggle/working is committed verbatim as notebook output, so ~3k JPEGs
+    from a 53-minute show at 1 FPS (~650 MB) would be uploaded as results.
+    /tmp is node-local, is not committed, and is wiped between sessions.
+    """
+    override = os.getenv("SCRATCH_DIR")
+    if override:
+        return Path(override).resolve()
+    if _is_kaggle():
+        return Path("/tmp/msi_scratch").resolve()
+    return Path("./data/scratch").resolve()
 
 
 
@@ -87,6 +121,7 @@ class Config:
     ENABLE_PUNCTUATION_RESTORE: bool = True  # lightweight regex heuristic (no heavy model), fixes NER on unpunctuated Whisper
 
     BASE_DIR: Path = field(default_factory=_resolve_base_dir)
+    SCRATCH_DIR: Path = field(default_factory=_resolve_scratch_dir)
     DATA_INPUT_DIR: Path = field(init=False)
     DATA_REGISTRY_DIR: Path = field(init=False)
     DATA_OUTPUT_DIR: Path = field(init=False)
@@ -101,6 +136,26 @@ class Config:
         if self.DEVICE == "cuda":
             return "cuda", "float16"
         return "cpu", "int8"
+
+    def use_cuda(self) -> bool:
+        """True when CUDA is both selected and actually usable."""
+        return self.DEVICE == "cuda" and torch.cuda.is_available()
+
+    def onnx_providers(self) -> list:
+        """ORT execution providers with a bounded CUDA arena.
+
+        Requesting the CUDA EP is not the same as getting it: ORT falls back
+        to CPU silently. Callers that require the GPU should pair this with
+        ``runtime.assert_cuda_execution_provider()``.
+        """
+        return onnx_providers(self.use_cuda())
+
+    def onnx_ctx_id(self) -> int:
+        """InsightFace ctx_id: 0 selects GPU 0, -1 forces CPU.
+
+        There is no ORT Metal/MPS provider, so 'mps' maps to CPU.
+        """
+        return 0 if self.use_cuda() else -1
 
     def diarization_kwargs(self) -> dict:
         """Keyword args for a SINGLE pyannote pipeline call.
@@ -129,6 +184,7 @@ class Config:
             self.DATA_INPUT_DIR,
             self.DATA_REGISTRY_DIR,
             self.DATA_OUTPUT_DIR,
+            self.SCRATCH_DIR,
         ):
             directory.mkdir(parents=True, exist_ok=True)
 

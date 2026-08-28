@@ -1,0 +1,15 @@
+# Hard floor/ceiling for transitive resolution. Pass with:
+#   pip install -c constraints.txt -r requirements.txt
+#
+# NumPy is the load-bearing pin: insightface==0.7.3 and onnxruntime-gpu==1.19.2
+# ship wheels compiled against the NumPy 1.x C ABI, and several transitive deps
+# (chromadb, scikit-image, pandas) declare only `numpy>=...`, so an unconstrained
+# resolve can float NumPy to 2.x and break both extensions at import with
+# "_ARRAY_API not found". runtime.assert_numpy_abi() enforces this at runtime.
+numpy==1.26.4
+
+# onnxruntime-gpu and onnxruntime install into the SAME `onnxruntime` import
+# path; chromadb pulls the CPU wheel in as a hard dependency. Constrain it to
+# the matching version so a stray resolve cannot downgrade the GPU build, and
+# run the uninstall/reinstall hygiene step in kaggle_setup.py afterwards.
+onnxruntime-gpu==1.19.2

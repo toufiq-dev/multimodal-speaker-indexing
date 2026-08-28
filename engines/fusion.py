@@ -23,7 +23,8 @@ Rebuilt after the failed end-to-end run. Three structural changes:
 from __future__ import annotations
 
 import re
-from typing import List, Dict, Tuple, Optional
+from bisect import bisect_left, bisect_right
+from typing import Iterable, List, Dict, Tuple, Optional
 
 from config import config
 from models import (
@@ -43,6 +44,18 @@ _GUEST_ANCHOR_RE = re.compile(
 
 def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _index_by_time(items: Iterable, key) -> Tuple[list, List[float]]:
+    """Sort items by a scalar time key and return (items, keys) for bisect.
+
+    Turn-vs-point containment was previously a nested scan: every diarization
+    turn rescanned every word and every face. On a full show that is
+    ~10^3 turns x ~10^4 words (and a comparable face count) per call. Sorting
+    once and binary-searching the range makes it O(n log n + matches).
+    """
+    ordered = sorted(items, key=key)
+    return ordered, [key(i) for i in ordered]
 
 
 class GatingFusion:
@@ -65,10 +78,12 @@ class GatingFusion:
     ) -> Dict[str, List[FaceOccurrence]]:
         """Collect all faces observed during each speaker's talking time."""
         speaker_faces: Dict[str, List[FaceOccurrence]] = {seg.speaker_id: [] for seg in diarization}
-        for face in faces:
-            for dia_seg in diarization:
-                if dia_seg.start <= face.frame_time <= dia_seg.end:
-                    speaker_faces[dia_seg.speaker_id].append(face)
+        ordered_faces, face_times = _index_by_time(faces, lambda f: f.frame_time)
+        for dia_seg in diarization:
+            lo = bisect_left(face_times, dia_seg.start)
+            hi = bisect_right(face_times, dia_seg.end)
+            if lo < hi:
+                speaker_faces[dia_seg.speaker_id].extend(ordered_faces[lo:hi])
         return speaker_faces
 
     def _best_registry_face_per_speaker(
@@ -262,12 +277,15 @@ class GatingFusion:
         """Exact construction: a turn's text = the words whose midpoint lies
         inside the turn. Kills the duplication bug class by construction."""
         finals: List[FinalSegment] = []
+        # Index words by midpoint once instead of regenerating the full word
+        # stream inside the per-turn loop.
+        ordered_words, word_mids = _index_by_time(
+            self._iter_words(transcribed), lambda w: (w.start + w.end) / 2.0)
+
         for dia_seg in sorted(diarization, key=lambda d: d.start):
-            mid_lo, mid_hi = dia_seg.start, dia_seg.end
-            words_in_turn = [
-                w for w in self._iter_words(transcribed)
-                if mid_lo <= (w.start + w.end) / 2.0 <= mid_hi
-            ]
+            lo = bisect_left(word_mids, dia_seg.start)
+            hi = bisect_right(word_mids, dia_seg.end)
+            words_in_turn = ordered_words[lo:hi]
             text = _norm(" ".join(w.word for w in words_in_turn))
             if not text:
                 continue

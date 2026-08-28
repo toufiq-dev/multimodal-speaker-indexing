@@ -11,6 +11,7 @@ from pyannote.audio import Pipeline
 
 from config import config
 from models import DiarizationSegment
+from runtime import release_gpu_memory
 
 
 def _load_pipeline() -> Pipeline:
@@ -29,7 +30,7 @@ def _load_pipeline() -> Pipeline:
             use_auth_token=hf_token if hf_token else None,
         )
 
-    if config.DEVICE == "cuda" and torch.cuda.is_available():
+    if config.use_cuda():
         pipeline.to(torch.device("cuda"))
 
     return pipeline
@@ -73,7 +74,13 @@ def run_diarization(audio_path: str, num_speakers: Optional[int] = None) -> List
 
     try:
         result = pipeline(str(audio), **kwargs)
-    except Exception:
+    except TypeError as e:
+        # Only an unsupported-keyword error justifies dropping the speaker-count
+        # hints. A blanket `except Exception` silently discarded NUM_SPEAKERS on
+        # any failure — including OOM — and reported the unconstrained result as
+        # if it had honoured the constraint.
+        print(f"[diarization] speaker-count hints rejected by the pipeline "
+              f"({e}); retrying unconstrained")
         result = pipeline(str(audio))
 
     # pyannote 4.x returns DiarizeOutput; extract the Annotation object.
@@ -91,5 +98,15 @@ def run_diarization(audio_path: str, num_speakers: Optional[int] = None) -> List
 
     segments.sort(key=lambda s: s.start)
 
-    torch.cuda.empty_cache()
+    if not segments:
+        raise RuntimeError(
+            f"Diarization produced no speech turns for {audio.name}. The audio "
+            f"is silent, or the pyannote pipeline loaded without weights."
+        )
+
+    # Drop the pipeline BEFORE releasing the cache: empty_cache() only returns
+    # blocks that already have no live reference, so the previous ordering
+    # (cache release with `pipeline` still in scope) reclaimed nothing.
+    del pipeline
+    release_gpu_memory()
     return segments

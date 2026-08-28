@@ -69,11 +69,15 @@ def run_cell(
     reference_texts_by_speaker: Dict[str, str],
 ) -> Dict:
     """Execute one matrix cell and compute its metric bundle."""
-    if cell.naming == "heuristic":
-        finals = heuristic_fusion(diarization, transcribed_word)
-    elif cell.transcription_mode == "oracle_text" and cell.naming == "heuristic":
+    # Order matters: text_only is a STRICTLY narrower case of naming="heuristic",
+    # so it must be tested first. With the branches reversed (the original
+    # order) the B2 text-only cell was unreachable and default_matrix() scored
+    # the B1 heuristic baseline twice under two different names.
+    if cell.transcription_mode == "oracle_text" and cell.naming == "heuristic":
         # Text-only baseline: bypass diarization entirely.
         finals = text_only(transcribed_word)
+    elif cell.naming == "heuristic":
+        finals = heuristic_fusion(diarization, transcribed_word)
     else:
         tsrc = (transcribed_word if cell.transcription_mode == "word"
                 else (transcribed_chunk or transcribed_word))

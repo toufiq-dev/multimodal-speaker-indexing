@@ -19,6 +19,7 @@ from peft import PeftModel
 
 from config import config
 from models import DiarizationSegment, TranscribedSegment
+from runtime import release_gpu_memory
 
 
 CHUNK_DURATION_SEC = 20.0
@@ -34,7 +35,13 @@ _WHITESPACE_RE = re.compile(r"\s+")
 
 
 def _restore_bengali_punct(text: str) -> str:
-    """Lightweight Bengali punctuation restoration (regex heuristic, zero-dep)."""
+    """Lightweight Bengali punctuation restoration (regex heuristic, zero-dep).
+
+    Mirrors engines/transcription.py, including the ENABLE_PUNCTUATION_RESTORE
+    gate so the two ASR paths are scored under identical text conventions.
+    """
+    if not config.ENABLE_PUNCTUATION_RESTORE:
+        return text
     if not text:
         return text
     if not re.search(r"[\u0980-\u09FF]", text):
@@ -46,12 +53,11 @@ def _restore_bengali_punct(text: str) -> str:
         words = text.split()
         mid = len(words) // 2
         text = " ".join(words[:mid]) + "। " + " ".join(words[mid:])
-    torch.cuda.empty_cache()
     return text.strip()
 
 
 def _resolve_torch_device() -> str:
-    if config.DEVICE == "cuda" and torch.cuda.is_available():
+    if config.use_cuda():
         return "cuda:0"
     if config.DEVICE == "mps":
         return "mps"
@@ -167,9 +173,7 @@ def _transcribe_chunk(model, processor, chunk_waveform, language="bn"):
     text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
     text = _SPECIAL_TOKEN_RE.sub("", text)
     text = _WHITESPACE_RE.sub(" ", text).strip()
-    text = _restore_bengali_punct(text)
-    torch.cuda.empty_cache()
-    return text
+    return _restore_bengali_punct(text)
 
 
 def transcribe_with_lora(model, processor, audio_path, diarization=None, language="bn"):
@@ -198,4 +202,5 @@ def transcribe_with_lora(model, processor, audio_path, diarization=None, languag
             merged.append(current)
             current = seg
     merged.append(current)
+    release_gpu_memory()
     return merged

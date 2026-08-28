@@ -54,6 +54,15 @@ logs/
 *.bin
 *.safetensors
 
+# Converted CT2 models. Never ship a PARTIAL model directory: config.json and
+# vocabulary.json are not matched by *.bin, so the clone used to carry a CT2
+# folder without weights, which faster-whisper reports as an opaque loader
+# error rather than "weights are missing".
+models/
+
+# Scratch intermediates (frames, extracted audio)
+data/scratch/
+
 # Kaggle
 kaggle.json
 *.kaggle
