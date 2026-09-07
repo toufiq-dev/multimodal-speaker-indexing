@@ -33,6 +33,8 @@ venv/
 env/
 .env
 .venv
+.venv-cpu/
+.venv-cpu-*/
 
 # IDE
 .vscode/
@@ -77,3 +79,10 @@ build/
 
 # Claude
 CLAUDE.md
+
+# 
+taste.md
+
+# data
+.jpeg
+.jpg
