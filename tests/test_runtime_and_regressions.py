@@ -483,3 +483,40 @@ def test_prepare_env_reports_a_missing_token(monkeypatch):
     monkeypatch.setattr(kaggle_setup, "setup_hf_token", lambda: "")
     out = kaggle_setup.prepare_env()
     assert out["HF_TOKEN"] is False
+
+
+# --------------------------------------------------------------------------
+# Entry-point smoke tests.
+#
+# Two NameErrors shipped because nothing ever loaded and called the scripts:
+# kaggle_setup.bootstrap() referenced NUMPY_ABI_LOCK without importing it, and
+# scripts/run_episode.py used os.environ without importing os. Engine unit
+# tests cannot catch a missing import in a script's entry point.
+# --------------------------------------------------------------------------
+
+def _load_script(name: str):
+    import importlib.util
+    repo = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(name, repo / "scripts" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_run_episode_refuses_cleanly_without_hf_token(monkeypatch, tmp_path):
+    """The HF_TOKEN guard must return 2 with a message, not raise NameError."""
+    mod = _load_script("run_episode")
+
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"\x00")          # the guard only checks existence
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("HUGGING_FACE_HUB_TOKEN", raising=False)
+    monkeypatch.setattr(sys, "argv", ["run_episode.py", str(video)])
+
+    assert mod.main() == 2
+
+
+def test_run_episode_rejects_a_missing_video(monkeypatch, tmp_path):
+    mod = _load_script("run_episode")
+    monkeypatch.setattr(sys, "argv", ["run_episode.py", str(tmp_path / "nope.mp4")])
+    assert mod.main() == 2
