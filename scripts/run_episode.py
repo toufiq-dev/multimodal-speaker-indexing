@@ -317,6 +317,20 @@ def main() -> int:
         print(f"error: video not found: {video}", file=sys.stderr)
         return 2
 
+    # Gated models (pyannote) 401 without a token. A kernel restart clears
+    # os.environ, so a pipeline launched as a subprocess can silently inherit
+    # an empty environment — say so up front instead of dying mid-diarization.
+    if not os.environ.get("HF_TOKEN"):
+        print(
+            "error: HF_TOKEN is not set in this process. Diarization uses the "
+            "gated model pyannote/speaker-diarization-3.1 and will fail. Fix: "
+            "run kaggle_setup.prepare_env() in the notebook before launching "
+            "this script (it reloads the token from Kaggle Secrets), or re-run "
+            "the bootstrap cell.",
+            file=sys.stderr,
+        )
+        return 2
+
     episode_id = args.id or video.stem
     out_dir = Path(args.output_dir).resolve() if args.output_dir else (
         config.DATA_OUTPUT_DIR / episode_id

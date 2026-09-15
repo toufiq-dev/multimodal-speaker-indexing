@@ -357,6 +357,7 @@ def test_bootstrap_rejects_an_english_only_conversion(tmp_path, monkeypatch):
 _SETUP_ENTRYPOINTS = (
     "bootstrap", "finish_setup", "main", "convert_asr_model", "preflight",
     "verify_imports", "verify_registry", "setup_hf_token", "create_directories",
+    "prepare_env",
 )
 
 
@@ -453,3 +454,32 @@ def test_finish_setup_reloads_the_hf_token(monkeypatch):
         "after every kernel restart")
     assert calls == ["token", "create_directories", "convert_asr_model",
                      "preflight", "verify_imports", "verify_registry"]
+
+
+def test_prepare_env_exports_whisper_model(tmp_path, monkeypatch):
+    """A restarted kernel loses os.environ; the subprocess needs both vars.
+
+    The pipeline is launched via subprocess.run, which inherits the parent's
+    environment. prepare_env() must therefore put HF_TOKEN and WHISPER_MODEL
+    back into os.environ.
+    """
+    import kaggle_setup
+
+    model_dir = tmp_path / "ct2"
+    model_dir.mkdir()
+    (model_dir / "model.bin").write_bytes(b"stub")
+    monkeypatch.setenv("CT2_MODEL_DIR", str(model_dir))
+    monkeypatch.delenv("WHISPER_MODEL", raising=False)
+    monkeypatch.setattr(kaggle_setup, "setup_hf_token", lambda: "x" * 40)
+
+    out = kaggle_setup.prepare_env()
+
+    assert out["HF_TOKEN"] is True
+    assert kaggle_setup.os.environ["WHISPER_MODEL"] == str(model_dir)
+
+
+def test_prepare_env_reports_a_missing_token(monkeypatch):
+    import kaggle_setup
+    monkeypatch.setattr(kaggle_setup, "setup_hf_token", lambda: "")
+    out = kaggle_setup.prepare_env()
+    assert out["HF_TOKEN"] is False

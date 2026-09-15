@@ -429,6 +429,28 @@ def finish_setup():
     verify_registry()
 
 
+def prepare_env():
+    """Ensure HF_TOKEN and WHISPER_MODEL are in ``os.environ`` for subprocesses.
+
+    ``bootstrap()`` sets both in-process, but **a kernel restart clears
+    ``os.environ``**. Since the pipeline is normally launched as a subprocess
+    (``subprocess.run(["python", "scripts/run_episode.py", ...])``), a
+    restarted kernel would hand it an empty environment and diarization would
+    fail with a gated-model 401. Call this immediately before spawning the
+    pipeline.
+
+    Returns a small dict describing what is now available.
+    """
+    token = setup_hf_token()
+    out = os.environ.get("CT2_MODEL_DIR", CT2_DIR)
+    if os.path.exists(os.path.join(out, "model.bin")):
+        os.environ.setdefault("WHISPER_MODEL", out)
+    return {
+        "HF_TOKEN": bool(token),
+        "WHISPER_MODEL": os.environ.get("WHISPER_MODEL", ""),
+    }
+
+
 def _missing_deps() -> list:
     """Names of required packages that cannot be imported in this process."""
     missing = []
