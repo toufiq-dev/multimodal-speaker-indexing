@@ -165,7 +165,7 @@ def transcribe_audio(
     segments, info = local_model.transcribe(
         str(audio),
         word_timestamps=True,
-        vad_filter=True,
+        vad_filter=config.WHISPER_VAD_FILTER,
         language="bn",
     )
 

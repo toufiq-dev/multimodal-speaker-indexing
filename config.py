@@ -132,9 +132,16 @@ class Config:
     # IoU above which a face in the current frame continues the previous
     # frame's track.
     ASD_TRACK_IOU: float = 0.3
-    # Minimum mean mouth motion for a track to count as "speaking". 0.0 accepts
-    # the most-moving track unconditionally; raise it to require real motion.
-    ASD_MIN_MOUTH_MOTION: float = 0.0
+    # Minimum mean mouth motion for a track to count as "speaking".
+    #
+    # CALIBRATED from the per-track distribution in face_tracks.json (RTV Goll
+    # Table, 8 FPS): faces that are present but silent max out at 0.0233
+    # (a panellist who never speaks: median 0.0150, max 0.0233), while faces
+    # that are actually talking sit at 0.038-0.074 (medians 0.038-0.061).
+    # 0.03 lies inside that gap, so a cutaway to a silent listener can no
+    # longer be mistaken for the speaker.
+    ASD_MIN_MOUTH_MOTION: float = field(
+        default_factory=lambda: _env_float("ASD_MIN_MOUTH_MOTION", 0.03))
     # Fraction of a turn's tracked faces a face track must account for before it
     # may be chosen as the speaker. The camera frames the speaker for most of a
     # turn; without this, a briefly visible background face that jitters can
@@ -145,14 +152,20 @@ class Config:
     # Per-turn identity taken from the visible speaking face, overriding the
     # audio-derived speaker label.
     #
-    # OFF by default. With the face threshold calibrated the per-speaker
-    # (audio) identity is already correct, and the override actively hurt: when
-    # the camera cut to a *silent* co-panelist during a turn, that still face
-    # was the only track present, so it named the turn after whoever was on
-    # screen. Turn it on only once ASD_MIN_MOUTH_MOTION can be calibrated from
-    # the per-track motion distribution written to face_tracks.json.
+    # ON, now that the mouth-motion gate is calibrated (see
+    # ASD_MIN_MOUTH_MOTION). It is needed to correct diarization mistakes: a
+    # speaker's turn can be clustered with a co-panelist, and when their face is
+    # visibly talking the override puts the turn back on the right person. With
+    # the motion gate a silent listener cannot be selected, so the earlier
+    # failure (a still face naming the turn) cannot recur.
     ENABLE_TURN_OVERRIDE: bool = field(
-        default_factory=lambda: os.getenv("ENABLE_TURN_OVERRIDE", "0") == "1")
+        default_factory=lambda: os.getenv("ENABLE_TURN_OVERRIDE", "1") == "1")
+    # Whisper's VAD drops quiet or heavily overlapped speech before decoding,
+    # which loses words in exactly the interruptions talk-shows are full of.
+    # Set WHISPER_VAD_FILTER=0 to recover them (at the cost of more hallucinated
+    # text in silence).
+    WHISPER_VAD_FILTER: bool = field(
+        default_factory=lambda: os.getenv("WHISPER_VAD_FILTER", "1") == "1")
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3

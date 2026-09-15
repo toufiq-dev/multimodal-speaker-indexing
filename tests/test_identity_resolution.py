@@ -214,30 +214,61 @@ def test_turn_uses_the_speaking_track_when_that_identity_is_supported(monkeypatc
     assert by_start[0.0] == "Tushar"
 
 
-def test_turn_override_is_off_by_default():
+def test_silent_cutaway_cannot_name_the_turn():
     """A cutaway to a silent co-panelist must not name the speaker's turn.
 
-    This is what produced Shahriar's name over Tushar's speech: the camera was
-    on a still listener, whose face was the only track in the turn. The override
-    ships disabled, so the audio-derived speaker label is used instead.
+    The mouth-motion gate is calibrated at 0.03 (measured: silent faces max
+    0.023, talking faces 0.038-0.074), so no track clears it here and the
+    audio-derived speaker label is used.
     """
     dia = _one_turn()
     faces = []
     for i in range(10):    # the speaker's own frames dominate this turn
-        faces.append(_trackface(i * 0.5, track=1, motion=0.0,
+        faces.append(_trackface(i * 0.5, track=1, motion=0.010,
                                 name="Tushar", conf=0.55))
-    for i in range(5):     # a cutaway to a moving co-panelist
-        faces.append(_trackface(1.0 + i * 0.5, track=2, motion=0.40,
+    for i in range(5):     # a cutaway to a co-panelist who is not talking
+        faces.append(_trackface(1.0 + i * 0.5, track=2, motion=0.015,
                                 name="Shahriar", conf=0.70))
 
     fusion = GatingFusion()
     resolved = fusion.resolve_identities(dia, [], faces)
 
-    assert fusion.turn_identities == {}          # override disabled
+    assert fusion.turn_identities == {}          # nothing is speaking on camera
     finals = fusion.create_final_segments(
         dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
-    # The audio-derived speaker label wins, not the moving face on screen.
     assert finals[0].speaker == "Tushar"
+
+
+def test_visibly_speaking_face_corrects_a_diarization_mistake():
+    """When the wrong person is clustered, a talking face puts the turn right.
+
+    Diarization can fold a speaker's turn into a co-panelist's cluster. If the
+    real speaker's face is visible and talking (motion above the calibrated
+    gate), the override restores the correct identity.
+    """
+    dia = [DiarizationSegment(0.0, 30.0, "SPEAKER_00"),
+           DiarizationSegment(30.0, 60.0, "SPEAKER_01")]
+    faces = []
+    # SPEAKER_00's turn was clustered wrongly: the faces seen are Shahriar's,
+    # but Tushar is the one on camera with a moving mouth.
+    for i in range(10):
+        faces.append(_trackface(i * 0.5, track=1, motion=0.010,
+                                name="Shahriar", conf=0.70))
+    for i in range(8):
+        faces.append(_trackface(i * 0.5, track=2, motion=0.050,
+                                name="Tushar", conf=0.55))
+    # Another speaker establishes Tushar as a supported identity.
+    for i in range(20):
+        faces.append(_trackface(30.0 + i * 0.5, track=3, motion=0.010,
+                                name="Tushar", conf=0.60))
+
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা"),
+              _seg(30, 60, "SPEAKER_01", "আরও কথা")], resolved)
+    by_start = {round(f.start, 1): f.speaker for f in finals}
+    assert by_start[0.0] == "Tushar"
 
 
 def test_without_track_information_the_speaker_label_is_used():
