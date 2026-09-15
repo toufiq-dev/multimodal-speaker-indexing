@@ -86,6 +86,7 @@ def _run_pipeline(
     lora_path: str | None,
     build_rag: bool,
     force: bool,
+    vision_fps: int,
 ) -> float:
     """Drive the full pipeline with per-video scratch + warm-cache reuse."""
     video = Path(video_path).resolve()
@@ -95,13 +96,15 @@ def _run_pipeline(
     # user did not ask for a forced re-run. Diarization + ASR are the expensive
     # stages and are always (re)run, but their inputs are stable.
     audio_path = scratch / "audio.wav"
-    frames_dir = scratch / "frames"
+    # Cache frames per sampling rate: frames extracted at 1 FPS cannot serve a
+    # mouth-motion pass that needs 8 FPS.
+    frames_dir = scratch / f"frames_{vision_fps}fps"
     if (not force) and audio_path.exists() and frames_dir.exists():
         print(f"[run_episode] reusing cached media for {video.stem} from {scratch}")
     else:
         from engines.media import extract_audio, extract_frames
 
-        print(f"[run_episode] extracting media to {scratch}")
+        print(f"[run_episode] extracting media to {scratch} ({vision_fps} FPS)")
         # extract_audio/extract_frames write into the *global* config.SCRATCH_DIR;
         # move the results into this episode's scratch so episodes can never
         # clobber each other (extract_frames clears its global output dir on
@@ -118,7 +121,7 @@ def _run_pipeline(
             # mixing old+new frames.
             shutil.rmtree(frames_dir, ignore_errors=True)
         frames_dir.mkdir(parents=True, exist_ok=True)
-        frames = extract_frames(str(video), fps=config.VISION_FPS)
+        frames = extract_frames(str(video), fps=vision_fps)
         for f in frames:
             shutil.move(f, frames_dir / Path(f).name)
 
@@ -137,6 +140,7 @@ def _run_pipeline(
         use_lora=use_lora,
         lora_path=lora_path,
         build_rag=build_rag,
+        vision_fps=vision_fps,
     )
     return time.time() - t0
 
@@ -150,6 +154,7 @@ def _run_engines(
     use_lora: bool,
     lora_path: str | None,
     build_rag: bool,
+    vision_fps: int,
 ) -> None:
     """Run diarization → ASR → vision → NER → fusion → write outputs."""
     if registry_dir:
@@ -185,8 +190,10 @@ def _run_engines(
     print(f"    {len(transcribed)} transcribed segments")
     release_gpu_memory()
 
-    print(f"[3] running vision on {len(frame_paths)} frames...")
-    faces = run_vision_pipeline(str(video), frame_paths=list(frame_paths))
+    print(f"[3] running vision on {len(frame_paths)} frames "
+          f"({vision_fps} FPS, tracked)...")
+    faces = run_vision_pipeline(str(video), frame_paths=list(frame_paths),
+                                fps=vision_fps)
     print(f"    {len(faces)} face occurrences")
     release_gpu_memory()
 
@@ -349,6 +356,9 @@ def main() -> int:
     ap.add_argument("--lora-path", help="LoRA adapter path (required with --use-lora)")
     ap.add_argument("--force", action="store_true",
                     help="Re-run even if cached audio/frames exist")
+    ap.add_argument("--vision-fps", type=int, default=None,
+                    help="Frame rate for the tracked active-speaker pass "
+                         f"(default {config.VISION_ASD_FPS} FPS)")
     args = ap.parse_args()
 
     # cuDNN 9 must be on the loader path from process start (see the docstring
@@ -399,6 +409,7 @@ def main() -> int:
         elapsed = _run_pipeline(
             str(video), args.registry, out_dir, args.use_lora, args.lora_path,
             not args.no_rag, args.force,
+            args.vision_fps or config.VISION_ASD_FPS,
         )
         _record(out_dir, out_dir / "result.json", run, gt_dir, elapsed)
     except Exception as e:

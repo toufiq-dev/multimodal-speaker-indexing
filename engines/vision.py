@@ -174,17 +174,26 @@ def _process_frames_with_vision(
     frame_paths: List[str],
     registry: Dict[str, Tuple[np.ndarray, int]],
     app: FaceAnalysis,
+    fps: int = 1,
 ) -> List[FaceOccurrence]:
-    """Process all frames, detect faces, compute lip-sync, match to registry."""
+    """Detect faces per frame, track them, and measure mouth motion.
+
+    Tracking is what makes active-speaker detection possible: a face is followed
+    across frames, and its mouth region is compared with *its own* previous
+    frame, so motion means articulation rather than a different person entering
+    the shot.
+    """
     occurrences: List[FaceOccurrence] = []
-    prev_faces: List[Tuple[Tuple[int, int, int, int], np.ndarray, np.ndarray]] = []  # (box, embedding, frame)
+    # Previous frame's detections: (box, face_track_id, embedding, frame).
+    prev: List[Tuple[Tuple[int, int, int, int], int, np.ndarray, np.ndarray]] = []
+    next_track_id = 0
     failures: List[str] = []
 
     for frame_idx, frame_path in enumerate(frame_paths):
         # Frames are extracted at t=0, 1/fps, 2/fps ... so frame i sits at
         # i/fps. The old '(idx+1)/fps' shifted every face occurrence a full
         # second late, corrupting audio-visual association.
-        frame_time = frame_idx / config.VISION_FPS
+        frame_time = frame_idx / max(fps, 1)
 
         try:
             frame = cv2.imread(frame_path)
@@ -194,8 +203,10 @@ def _process_frames_with_vision(
 
             faces = app.get(frame)
             if not faces:
-                prev_faces = []
+                prev = []
                 continue
+
+            current: List[Tuple[Tuple[int, int, int, int], int, np.ndarray, np.ndarray]] = []
 
             for face in faces:
                 box = _clamp_box(tuple(map(int, face.bbox)), frame)
@@ -224,20 +235,25 @@ def _process_frames_with_vision(
                     best_name = "UNKNOWN"
                     best_track_id = -1
 
-                lip_sync = 0.0
-                if prev_faces:
-                    best_iou = 0.0
-                    best_prev_box = None
-                    best_prev_frame = None
-                    for prev_box, _, prev_frame in prev_faces:
-                        iou = _bbox_iou(box, prev_box)
-                        if iou > best_iou:
-                            best_iou = iou
-                            best_prev_box = prev_box
-                            best_prev_frame = prev_frame
+                # Continue the best-overlapping previous track, or start one.
+                # mouth_motion is measured against the SAME track's previous
+                # frame, so a cutaway to a different person does not register as
+                # speech.
+                face_track_id = -1
+                mouth_motion = 0.0
+                best_iou = 0.0
+                match = None
+                for prev_box, prev_tid, _, prev_frame in prev:
+                    iou = _bbox_iou(box, prev_box)
+                    if iou > best_iou:
+                        best_iou, match = iou, (prev_box, prev_tid, prev_frame)
 
-                    if best_prev_box and best_iou > 0.3 and best_prev_frame is not None:
-                        lip_sync = _mouth_region_diff(box, best_prev_box, frame, best_prev_frame)
+                if match is not None and best_iou > config.ASD_TRACK_IOU:
+                    prev_box, face_track_id, prev_frame = match
+                    mouth_motion = _mouth_region_diff(box, prev_box, frame, prev_frame)
+                else:
+                    face_track_id = next_track_id
+                    next_track_id += 1
 
                 occurrences.append(FaceOccurrence(
                     frame_time=frame_time,
@@ -245,17 +261,20 @@ def _process_frames_with_vision(
                     track_id=best_track_id if best_track_id >= 0 else len(occurrences),
                     resolved_face_id=best_name,
                     face_confidence=face_confidence,
-                    lip_sync_score=lip_sync,
-                    embedding=embedding if best_name == "UNKNOWN" else None,
+                    lip_sync_score=mouth_motion,
+                    # Keep every embedding: track-level identity averages them,
+                    # which is how a per-frame miss becomes a confident match.
+                    embedding=embedding,
                     runner_up_face_id=second_name,
                     runner_up_confidence=second_sim,
+                    face_track_id=face_track_id,
+                    mouth_motion=mouth_motion,
                 ))
+                current.append((box, face_track_id, embedding, frame))
 
-            prev_faces = [(_clamp_box(tuple(map(int, f.bbox)), frame),
-                           f.embedding / np.linalg.norm(f.embedding), frame)
-                          for f in faces]
+            prev = current
 
-            # Kaggle T4: periodic reclaim to limit fragmentation over ~2.7k frames.
+            # Kaggle T4: periodic reclaim to limit fragmentation over ~3k frames.
             if frame_idx % 500 == 0:
                 release_gpu_memory()
 
@@ -354,13 +373,80 @@ def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurr
     return occurrences
 
 
-def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None) -> List[FaceOccurrence]:
+def _resolve_track_identities(
+    occurrences: List[FaceOccurrence],
+    registry: Dict[str, Tuple[np.ndarray, int]],
+) -> List[FaceOccurrence]:
+    """Re-identify each face track from its aggregated embedding.
+
+    A partially-turned or small face often falls below ``FACE_SIM_THRESHOLD``
+    frame by frame, which is why the *speaking* face can contribute nothing to
+    the vote while a well-framed listener wins. Averaging the L2-normalised
+    embeddings of a track is far more stable than any single frame; the
+    resulting identity is applied to every face of that track.
+    """
+    if not registry:
+        return occurrences
+
+    from engines.active_speaker import track_mean_embedding
+
+    index_groups: Dict[int, List[int]] = {}
+    for i, occ in enumerate(occurrences):
+        if occ.face_track_id >= 0 and occ.embedding is not None:
+            index_groups.setdefault(occ.face_track_id, []).append(i)
+
+    resolved_tracks = 0
+    for idxs in index_groups.values():
+        embedding = track_mean_embedding([occurrences[i] for i in idxs])
+        if embedding is None:
+            continue
+
+        best_name, best_sim = "UNKNOWN", 0.0
+        second_name, second_sim = "UNKNOWN", 0.0
+        for name, (reg_emb, _) in registry.items():
+            sim = _cosine_similarity(embedding, reg_emb)
+            if sim > best_sim:
+                second_name, second_sim = best_name, best_sim
+                best_sim, best_name = sim, name
+            elif sim > second_sim:
+                second_name, second_sim = name, sim
+
+        if best_sim <= config.FACE_SIM_THRESHOLD:
+            continue
+
+        resolved_tracks += 1
+        for i in idxs:
+            occ = occurrences[i]
+            occurrences[i] = FaceOccurrence(
+                frame_time=occ.frame_time,
+                box=occ.box,
+                track_id=occ.track_id,
+                resolved_face_id=best_name,
+                face_confidence=best_sim,
+                lip_sync_score=occ.lip_sync_score,
+                embedding=occ.embedding,
+                runner_up_face_id=second_name,
+                runner_up_confidence=second_sim,
+                face_track_id=occ.face_track_id,
+                mouth_motion=occ.mouth_motion,
+            )
+
+    print(f"[vision] track-level identity resolved {resolved_tracks} "
+          f"of {len(index_groups)} face tracks")
+    return occurrences
+
+
+def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None,
+                        fps: Optional[int] = None) -> List[FaceOccurrence]:
     """
     Full vision pipeline: extract frames, detect faces, match registry, lip-sync, cluster.
 
     Args:
         video_path: Path to input video file.
         frame_paths: Optional pre-extracted frame paths. If None, extracts new frames.
+        fps: Sampling rate of ``frame_paths``, used to timestamp detections. The
+            active-speaker pass samples well above ``VISION_FPS`` because mouth
+            motion is meaningless across one-second gaps.
 
     Returns:
         List of FaceOccurrence sorted by frame_time.
@@ -369,6 +455,8 @@ def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None
     # CPU without raising, which turns a GPU run into a silent ~20x slowdown.
     if config.use_cuda():
         assert_cuda_execution_provider()
+
+    fps = fps or config.VISION_FPS
 
     app = FaceAnalysis(
         providers=config.onnx_providers(),
@@ -380,10 +468,13 @@ def run_vision_pipeline(video_path: str, frame_paths: Optional[List[str]] = None
     registry = _load_registry_embeddings(app)
 
     if frame_paths is None:
-        frame_paths = extract_frames(video_path, fps=config.VISION_FPS)
+        frame_paths = extract_frames(video_path, fps=fps)
 
     try:
-        occurrences = _process_frames_with_vision(frame_paths, registry, app)
+        occurrences = _process_frames_with_vision(frame_paths, registry, app, fps)
+        # Track-level identity before clustering: a track whose per-frame
+        # similarity never cleared the threshold can still be named as a whole.
+        occurrences = _resolve_track_identities(occurrences, registry)
         occurrences = _cluster_unknown_faces(occurrences)
     finally:
         # ONNX Runtime device memory is invisible to torch's allocator; only

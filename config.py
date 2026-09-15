@@ -103,6 +103,17 @@ class Config:
     FACE_SIM_MARGIN: float = 0.0
     FACE_MIN_FRAME_FRACTION: float = 0.0
     VISION_FPS: int = 1
+    # Active-speaker detection needs consecutive frames close enough in time to
+    # observe articulation. At VISION_FPS=1 the interval is a full second, far
+    # above phoneme rate, so mouth motion is meaningless; the tracked pass
+    # therefore samples at this rate instead.
+    VISION_ASD_FPS: int = 8
+    # IoU above which a face in the current frame continues the previous
+    # frame's track.
+    ASD_TRACK_IOU: float = 0.3
+    # Minimum mean mouth motion for a track to count as "speaking". 0.0 accepts
+    # the most-moving track unconditionally; raise it to require real motion.
+    ASD_MIN_MOUTH_MOTION: float = 0.0
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3

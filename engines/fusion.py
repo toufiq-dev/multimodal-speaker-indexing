@@ -70,6 +70,9 @@ class GatingFusion:
         #: Per-speaker face evidence from the last resolve_identities() call,
         #: persisted by callers for threshold calibration.
         self.last_diagnostics: Dict[str, Dict] = {}
+        #: Per-TURN identity resolved from the speaking face track, keyed by
+        #: (start, end, speaker_id). Preferred over the per-speaker label.
+        self.turn_identities: Dict[Tuple[float, float, str], Tuple[str, float]] = {}
 
     # ------------------------------------------------------------------
     # Evidence collection
@@ -256,6 +259,59 @@ class GatingFusion:
                     scores[key] = scores.get(key, 0.0) + weight
         return scores
 
+    def _turn_identities_from_tracks(
+        self,
+        diarization: List[DiarizationSegment],
+        faces: List[FaceOccurrence],
+    ) -> Dict[Tuple[float, float, str], Tuple[str, float]]:
+        """Attribute each turn to the face TRACK that is speaking.
+
+        The previous rule pooled every face visible anywhere in a speaker's
+        turns and let the best-matching one name all of them. In multi-camera
+        footage a still, well-framed listener matches the registry better than
+        the speaker, so one cutaway could flip an entire speaker's label. Here
+        each turn is decided on its own, from the track whose mouth is moving.
+
+        Returns {(start, end, speaker_id): (name, confidence)}. Faces without
+        track information (``face_track_id < 0``) produce an empty map, so
+        callers that do not track keep the previous behaviour.
+        """
+        from engines.active_speaker import speaking_track, track_identity
+
+        tracked = [f for f in faces if getattr(f, "face_track_id", -1) >= 0]
+        if not tracked:
+            return {}
+
+        ordered_faces, face_times = _index_by_time(tracked, lambda f: f.frame_time)
+        out: Dict[Tuple[float, float, str], Tuple[str, float]] = {}
+        for dia_seg in sorted(diarization, key=lambda d: d.start):
+            lo = bisect_left(face_times, dia_seg.start)
+            hi = bisect_right(face_times, dia_seg.end)
+            turn_faces = ordered_faces[lo:hi]
+            if not turn_faces:
+                continue
+            tid = speaking_track(turn_faces, config.ASD_MIN_MOUTH_MOTION)
+            if tid is None:
+                continue
+            identity = track_identity(
+                [f for f in turn_faces if f.face_track_id == tid])
+            if identity is None:
+                continue
+            out[(round(dia_seg.start, 3), round(dia_seg.end, 3),
+                 dia_seg.speaker_id)] = identity
+        return out
+
+    def _name_for_turn(
+        self,
+        dia_seg: DiarizationSegment,
+        resolved_names: Dict[str, Tuple[str, float]],
+    ) -> Tuple[str, float]:
+        """Identity for one turn: speaking-track result, else the speaker label."""
+        key = (round(dia_seg.start, 3), round(dia_seg.end, 3), dia_seg.speaker_id)
+        if key in self.turn_identities:
+            return self.turn_identities[key]
+        return resolved_names.get(dia_seg.speaker_id, ("UNKNOWN", 0.0))
+
     # ------------------------------------------------------------------
     # Identity resolution (deterministic cascade)
     # ------------------------------------------------------------------
@@ -296,6 +352,11 @@ class GatingFusion:
         # presence thresholds can be chosen from measured gaps rather than
         # guessed — guessing them once removed every real name from the output.
         self.last_diagnostics = self.registry_face_diagnostics(speaker_faces)
+
+        # Per-turn identity from the speaking face track (active-speaker
+        # evidence). Empty when the faces carry no track information, in which
+        # case create_final_segments falls back to the per-speaker label.
+        self.turn_identities = self._turn_identities_from_tracks(diarization, faces)
 
         # Corroborated names: registry identities seen in the video plus the NER
         # output. A textual anchor matching one of these is trusted; anything
@@ -394,8 +455,7 @@ class GatingFusion:
             text = _norm(" ".join(w.word for w in words_in_turn))
             if not text:
                 continue
-            speaker_name, confidence = resolved_names.get(
-                dia_seg.speaker_id, ("UNKNOWN", 0.0))
+            speaker_name, confidence = self._name_for_turn(dia_seg, resolved_names)
             finals.append(FinalSegment(
                 start=dia_seg.start,
                 end=dia_seg.end,
@@ -449,7 +509,7 @@ class GatingFusion:
             if not text:
                 continue
             d = diarization[idx]
-            speaker_name, confidence = resolved_names.get(d.speaker_id, ("UNKNOWN", 0.0))
+            speaker_name, confidence = self._name_for_turn(d, resolved_names)
             finals.append(FinalSegment(
                 start=d.start, end=d.end,
                 speaker=speaker_name, text=text, confidence=confidence,

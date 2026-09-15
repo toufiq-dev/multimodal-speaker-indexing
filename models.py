@@ -50,6 +50,14 @@ class FaceOccurrence:
     # match. Without it, one ambiguous frame could name a whole speaker.
     runner_up_face_id: str = "UNKNOWN"
     runner_up_confidence: float = 0.0
+    # Temporal track this face belongs to across consecutive frames, and the
+    # mouth-region motion measured against the same track's previous frame.
+    # Identity must be attributed to the track that is *speaking* (mouth
+    # moving), not to whichever visible face matches the registry best: in
+    # multi-camera footage a still, well-framed listener otherwise outvotes the
+    # speaker. See engines/active_speaker.py.
+    face_track_id: int = -1
+    mouth_motion: float = 0.0
 
 
 @dataclass

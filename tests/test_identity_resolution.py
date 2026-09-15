@@ -160,3 +160,67 @@ def test_registry_diagnostics_reports_gaps_and_presence():
     assert d["winner"] == "Nahid"
     assert d["winner_presence"] == round(2 / 3, 3)
     assert d["best_margin"] == round(0.81 - 0.70, 3)
+
+
+# ── Per-turn identity from the speaking face track (Fixes 1 & 3) ───────
+#
+# The decisive failure: a still, well-framed listener matched the registry
+# confidently across many frames, so the pooled vote named the speaker's turns
+# after the non-speaker. Identity is now decided per TURN, from the track whose
+# mouth is moving.
+
+def _trackface(t, track, motion, name="UNKNOWN", conf=0.0):
+    return FaceOccurrence(frame_time=t, box=(0, 0, 10, 10), track_id=0,
+                          resolved_face_id=name, face_confidence=conf,
+                          face_track_id=track, mouth_motion=motion)
+
+
+def _one_turn():
+    return [DiarizationSegment(0.0, 30.0, "SPEAKER_00")]
+
+
+def test_turn_uses_the_speaking_track_not_the_best_matching_listener():
+    dia = _one_turn()
+    faces = []
+    # A listener: 20 still frames, confidently matched to Shahriar.
+    for i in range(20):
+        faces.append(_trackface(i * 0.5, track=1, motion=0.0,
+                                name="Shahriar", conf=0.78))
+    # The speaker: fewer frames, weaker similarity, but the mouth is moving.
+    for i in range(10):
+        faces.append(_trackface(i * 0.5, track=2, motion=0.30,
+                                name="Tushar", conf=0.60))
+
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+
+    assert finals[0].speaker == "Tushar"
+    assert finals[0].confidence == 0.6
+
+
+def test_without_track_information_the_speaker_label_is_used():
+    # Faces produced by callers that do not track must keep old behaviour.
+    dia = _one_turn()
+    faces = [_face(1.0, "Shahriar", 0.80)]
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+
+    assert fusion.turn_identities == {}
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+    assert finals[0].speaker == "Shahriar"
+
+
+def test_speaking_track_without_a_registry_identity_falls_back():
+    # The moving face has no name (e.g. never matched): the turn keeps the
+    # per-speaker fallback rather than inventing a label.
+    dia = _one_turn()
+    faces = [_trackface(1.0, track=2, motion=0.30, name="UNKNOWN"),
+             _face(1.5, "Shahriar", 0.80)]
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+    assert finals[0].speaker == "Shahriar"
