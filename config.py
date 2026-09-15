@@ -94,6 +94,14 @@ class Config:
     BANGLABERT_NER_MODEL: str = "sagorsarker/banglabert-ner"
     BANGLABERT_NER_FALLBACK: str = "sagorsarker/mbert-bengali-ner"
     FACE_SIM_THRESHOLD: float = 0.65
+    # Identity resolution rejects a registry match whose top-1 similarity is
+    # not clearly ahead of the runner-up (that is the signature of two
+    # enrolled people looking alike), and requires the winning identity to be
+    # present in at least this fraction of the speaker's detected faces.
+    # Both default to precision-first: an unresolved face_cluster_N label is
+    # preferable to a confident wrong name.
+    FACE_SIM_MARGIN: float = 0.05
+    FACE_MIN_FRAME_FRACTION: float = 0.4
     VISION_FPS: int = 1
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5

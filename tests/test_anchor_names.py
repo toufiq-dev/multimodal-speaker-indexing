@@ -73,12 +73,15 @@ class TestExtractAnchorNames:
         assert names == []
 
     def test_four_word_limit(self):
-        # "প্রথম" is a stopword, so use non-stopword ordinal-like words
+        # _MAX_NAME_WORDS = 3: a four-word capture is truncated to three.
         names = extract_anchor_names_from_text(
-            "আমি এক দুই তিন চার পাঁচ"
+            "আমি করিম হাসান রহমান সজীব"
         )
-        # 5 words, but _MAX_NAME_WORDS = 4 → capped at 4
-        assert names == ["এক দুই তিন চার"]
+        assert names == ["করিম হাসান রহমান"]
+
+    def test_numerals_are_not_names(self):
+        # Numerals are never part of a person's name and must be rejected.
+        assert extract_anchor_names_from_text("আমি এক দুই তিন চার পাঁচ") == []
 
     def test_name_at_end_of_sentence(self):
         names = extract_anchor_names_from_text("আমি ফারহান।")
@@ -89,17 +92,20 @@ class TestExtractAnchorNames:
         names = extract_anchor_names_from_text("আমি Hello World")
         assert names == []  # no Bengali characters after আমি
 
-    def test_name_followed_by_non_stopword_words(self):
-        # Non-stopword words are included (function doesn't know grammar)
-        names = extract_anchor_names_from_text("আমি তিন বছর ধরে")
-        assert names == ["তিন বছর ধরে"]
+    def test_non_name_words_reject_the_capture(self):
+        # "তিন"/"বছর"/"ধরে" are non-name words: this is not a name.
+        assert extract_anchor_names_from_text("আমি তিন বছর ধরে") == []
 
-    def test_greedy_capture_across_second_ami(self):
-        # The greedy regex captures everything Bengali between first আমি and
-        # end of Bengali chars, so "আমি X আমি Y" → one match "X আমি Y"
-        text = "আমি রাশেদ আমি নাভিদ"
-        names = extract_anchor_names_from_text(text)
-        assert names == ["রাশেদ আমি নাভিদ"]
+    def test_capture_containing_ami_is_rejected(self):
+        # A real name never contains the pronoun "আমি"; the greedy capture
+        # "রাশেদ আমি নাভিদ" is therefore rejected rather than emitted.
+        assert extract_anchor_names_from_text("আমি রাশেদ আমি নাভিদ") == []
+
+    def test_garbage_clause_is_not_a_name(self):
+        # Regression for the RTV Goll Table run: this exact clause was emitted
+        # as a speaker label because a small stopword list let it through.
+        assert extract_anchor_names_from_text(
+            "আমি কলকাতা দল গেছিলাম তখন") == []
 
     def test_punctuation_breaks_capture(self):
         # Bengali danda (।) is not in [\u0980-\u09FF ] so it stops the regex

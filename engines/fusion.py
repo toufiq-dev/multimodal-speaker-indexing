@@ -89,18 +89,50 @@ class GatingFusion:
     def _best_registry_face_per_speaker(
         self, speaker_faces: Dict[str, List[FaceOccurrence]]
     ) -> Dict[str, Tuple[str, float]]:
-        """Per speaker: (registry_name, max_face_sim) over non-cluster matches."""
+        """Per speaker: (registry_name, confidence) by majority vote over faces.
+
+        The previous rule took the single highest-similarity face across ALL of
+        a speaker's frames and named the whole speaker from it. That is fragile:
+        one ambiguous frame — or a camera cut to a listener — could name an
+        entire speaker, and it produced a constant confidence per speaker.
+
+        Now each detected face votes for its identity, and a name is accepted
+        only when the evidence is unambiguous:
+
+          * the face clears ``FACE_SIM_THRESHOLD`` (vision already set this), and
+          * its top-1 similarity leads the runner-up by ``FACE_SIM_MARGIN``
+            (two enrolled people who look alike produce a small gap), and
+          * the winning identity appears in at least
+            ``FACE_MIN_FRAME_FRACTION`` of the speaker's detected faces.
+
+        The reported confidence is the MEAN similarity of the winning identity's
+        faces, so it varies with evidence instead of being a copied constant.
+        """
         out: Dict[str, Tuple[str, float]] = {}
         for spk, occs in speaker_faces.items():
-            best_name, best_conf = None, 0.0
+            if not occs:
+                continue
+            votes: Dict[str, List[float]] = {}
             for f in occs:
                 fid = f.resolved_face_id
                 if fid == "UNKNOWN" or fid.startswith("face_cluster_"):
                     continue
-                if f.face_confidence > best_conf:
-                    best_name, best_conf = fid, f.face_confidence
-            if best_name:
-                out[spk] = (best_name, best_conf)
+                if f.face_confidence < config.FACE_SIM_THRESHOLD:
+                    continue
+                if (f.face_confidence - f.runner_up_confidence) < config.FACE_SIM_MARGIN:
+                    # Ambiguous: the runner-up is too close to call.
+                    continue
+                votes.setdefault(fid, []).append(f.face_confidence)
+
+            if not votes:
+                continue
+
+            name = max(votes, key=lambda n: len(votes[n]))
+            sims = votes[name]
+            if len(sims) / len(occs) < config.FACE_MIN_FRAME_FRACTION:
+                # Present too rarely to attribute the whole speaker to it.
+                continue
+            out[spk] = (name, round(sum(sims) / len(sims), 3))
         return out
 
     def _best_cluster_per_speaker(

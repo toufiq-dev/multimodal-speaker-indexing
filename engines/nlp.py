@@ -35,7 +35,37 @@ _POST_AMI_STOPWORDS = {
     "নই", "না", "ঠিক", "আসলে", "মানে", "তো", "যে", "এখন", "সবসময়",
     "এই", "ওই", "সেই", "প্রথম", "শেষ", "আবার",
 }
-_MAX_NAME_WORDS = 4
+
+#: Tokens that must never appear inside a captured "name". The anchor regex is
+#: deliberately greedy (a non-greedy quantifier captured only two characters),
+#: so trimming against a small stopword list is not enough: the clause
+#: "আমি কলকাতা দল গেছিলাম তখন" was accepted as a name and became a speaker
+#: label in the output. A roster/NER corroboration gate would be the principled
+#: long-term fix; this negative lexicon plus the token cap is the practical one.
+_NON_NAME_WORDS = {
+    # places / geography
+    "কলকাতা", "ঢাকা", "চট্টগ্রাম", "খুলনা", "রাজশাহী", "সিলেট", "বরিশাল",
+    "বাংলাদেশ", "দেশ", "এলাকা", "এলাকাতে", "বাড়ি", "বাড়ির", "গ্রাম",
+    # numerals (never part of a person's name)
+    "এক", "দুই", "তিন", "চার", "পাঁচ", "ছয়", "সাত", "আট", "নয়", "দশ",
+    # common content words observed after "আমি" in running speech
+    "দল", "গেছিলাম", "তখন", "বছর", "ধরে", "কথা", "বিষয়", "নির্বাচন",
+    "সরকার", "সংবাদ", "খবর", "সময়", "লোক", "মানুষ", "বক্তব্য",
+    # self-reference / pronouns
+    "আমি", "আমরা", "আমার", "আমাকে", "আমাদের", "আপনি", "তিনি", "তারা",
+}
+_MAX_NAME_WORDS = 3
+
+
+def _plausible_name(tokens: List[str]) -> bool:
+    """True when the captured tokens can plausibly be a person's name.
+
+    Rejects empty captures, over-long captures, absurdly long "words", and any
+    capture containing a known non-name token.
+    """
+    if not tokens or len(tokens) > _MAX_NAME_WORDS:
+        return False
+    return all(len(t) <= 15 and t not in _NON_NAME_WORDS for t in tokens)
 
 #: NER window size in characters. TokenClassificationPipeline truncates to the
 #: tokenizer's model_max_length (512 subwords) WITHOUT warning, so a 120-second
@@ -64,7 +94,7 @@ def extract_anchor_names_from_text(text: str) -> List[str]:
             trimmed.append(w)
             if len(trimmed) >= _MAX_NAME_WORDS:
                 break
-        if trimmed:
+        if _plausible_name(trimmed):
             names.append(" ".join(trimmed))
     return names
 

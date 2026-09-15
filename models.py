@@ -44,6 +44,12 @@ class FaceOccurrence:
     face_confidence: float = 0.0
     lip_sync_score: float = 0.0
     embedding: Optional[np.ndarray] = None
+    # The second-best registry identity for this face and its similarity.
+    # Identity resolution needs the top-1/top-2 gap: a face that is almost
+    # equally close to two enrolled people must not be reported as a confident
+    # match. Without it, one ambiguous frame could name a whole speaker.
+    runner_up_face_id: str = "UNKNOWN"
+    runner_up_confidence: float = 0.0
 
 
 @dataclass

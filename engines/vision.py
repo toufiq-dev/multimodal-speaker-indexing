@@ -204,13 +204,20 @@ def _process_frames_with_vision(
                 best_name = "UNKNOWN"
                 best_sim = 0.0
                 best_track_id = -1
+                second_name = "UNKNOWN"
+                second_sim = 0.0
 
                 for name, (reg_emb, track_id) in registry.items():
                     sim = _cosine_similarity(embedding, reg_emb)
                     if sim > best_sim:
+                        # Demote the previous best to runner-up so identity
+                        # resolution can see how close the two candidates are.
+                        second_name, second_sim = best_name, best_sim
                         best_sim = sim
                         best_name = name
                         best_track_id = track_id
+                    elif sim > second_sim:
+                        second_name, second_sim = name, sim
 
                 face_confidence = best_sim
                 if best_sim <= config.FACE_SIM_THRESHOLD:
@@ -240,6 +247,8 @@ def _process_frames_with_vision(
                     face_confidence=face_confidence,
                     lip_sync_score=lip_sync,
                     embedding=embedding if best_name == "UNKNOWN" else None,
+                    runner_up_face_id=second_name,
+                    runner_up_confidence=second_sim,
                 ))
 
             prev_faces = [(_clamp_box(tuple(map(int, f.bbox)), frame),
@@ -337,6 +346,8 @@ def _cluster_unknown_faces(occurrences: List[FaceOccurrence]) -> List[FaceOccurr
             face_confidence=occurrences[idx].face_confidence,
             lip_sync_score=occurrences[idx].lip_sync_score,
             embedding=occurrences[idx].embedding,
+            runner_up_face_id=occurrences[idx].runner_up_face_id,
+            runner_up_confidence=occurrences[idx].runner_up_confidence,
         )
 
     release_gpu_memory()
