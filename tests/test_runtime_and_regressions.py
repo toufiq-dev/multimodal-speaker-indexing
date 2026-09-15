@@ -343,3 +343,113 @@ def test_bootstrap_rejects_an_english_only_conversion(tmp_path, monkeypatch):
     # Silently decoding Bangla through an English decoder is worse than a crash.
     with pytest.raises(RuntimeError, match="English-only"):
         kaggle_setup.convert_asr_model()
+
+
+# --------------------------------------------------------------------------
+# bootstrap(): the notebook-facing, idempotent, restart-safe entry point.
+#
+# These exist because a stale module in the Kaggle kernel caused an
+# AttributeError ("kaggle_setup has no attribute 'bootstrap'") after a
+# `git pull`, and because a missing token reload made preflight fail after a
+# restart. Both were recoverable only by re-running cells one at a time.
+# --------------------------------------------------------------------------
+
+_SETUP_ENTRYPOINTS = (
+    "bootstrap", "finish_setup", "main", "convert_asr_model", "preflight",
+    "verify_imports", "verify_registry", "setup_hf_token", "create_directories",
+)
+
+
+def test_setup_entrypoints_exist_and_are_callable():
+    """Guard against shipping a setup path the notebook cannot call."""
+    import kaggle_setup
+    for name in _SETUP_ENTRYPOINTS:
+        assert hasattr(kaggle_setup, name), f"kaggle_setup.{name} is missing"
+        assert callable(getattr(kaggle_setup, name)), f"{name} is not callable"
+
+
+def _stub_bootstrap_common(monkeypatch, numpy_version, missing=()):
+    """Neutralise bootstrap()'s side effects and record the tail it runs."""
+    import kaggle_setup
+    import numpy
+
+    monkeypatch.setattr(kaggle_setup, "create_directories", lambda: None)
+    monkeypatch.setattr(kaggle_setup, "setup_hf_token", lambda: "x" * 40)
+    monkeypatch.setattr(numpy, "__version__", numpy_version)
+    monkeypatch.setattr(kaggle_setup, "_missing_deps", lambda: list(missing))
+
+    ran: list = []
+    for name in ("ensure_ffmpeg", "convert_asr_model", "preflight",
+                 "verify_imports", "verify_registry"):
+        monkeypatch.setattr(
+            kaggle_setup, name,
+            (lambda n: (lambda: ran.append(n)))(name))
+    installed: list = []
+    for name in ("install_pytorch", "install_numpy", "install_insightface",
+                 "install_requirements", "fix_onnxruntime_conflict",
+                 "configure_cudnn_path"):
+        monkeypatch.setattr(
+            kaggle_setup, name,
+            (lambda n: (lambda: installed.append(n)))(name))
+    monkeypatch.setattr(kaggle_setup, "_pip",
+                        lambda *a, **k: installed.append(("pip",) + a))
+    return ran, installed
+
+
+def test_bootstrap_pins_numpy_and_stops_before_the_heavy_tail(monkeypatch):
+    """A wrong in-memory NumPy must pin and STOP, not run into a RecursionError."""
+    import kaggle_setup
+    ran, installed = _stub_bootstrap_common(monkeypatch, "2.5.2")
+
+    kaggle_setup.bootstrap()
+
+    assert installed, "bootstrap did not pin NumPy when the ABI was wrong"
+    assert ran == [], f"bootstrap continued past the NumPy guard: {ran}"
+
+
+def test_bootstrap_installs_missing_deps_then_stops(monkeypatch):
+    """Missing packages must trigger the install and stop for a restart."""
+    import kaggle_setup
+    ran, installed = _stub_bootstrap_common(
+        monkeypatch, "1.26.4", missing=["torch", "insightface"])
+
+    kaggle_setup.bootstrap()
+
+    assert installed, "bootstrap did not install missing dependencies"
+    assert ran == [], f"bootstrap continued past the install guard: {ran}"
+
+
+def test_bootstrap_runs_the_tail_when_everything_is_ready(monkeypatch):
+    """With NumPy correct and deps present, the full verified tail must run."""
+    import kaggle_setup
+    ran, installed = _stub_bootstrap_common(monkeypatch, "1.26.4")
+
+    kaggle_setup.bootstrap()
+
+    assert ran == ["ensure_ffmpeg", "convert_asr_model", "preflight",
+                   "verify_imports", "verify_registry"], ran
+    assert installed == [], "bootstrap reinstalled when nothing was missing"
+
+
+def test_finish_setup_reloads_the_hf_token(monkeypatch):
+    """A kernel restart clears os.environ; finish_setup() must reload the token.
+
+    This is the exact defect that made preflight() fail after a restart.
+    """
+    import kaggle_setup
+    calls: list = []
+    monkeypatch.setattr(kaggle_setup, "setup_hf_token",
+                        lambda: calls.append("token"))
+    for name in ("create_directories", "convert_asr_model", "preflight",
+                 "verify_imports", "verify_registry"):
+        monkeypatch.setattr(
+            kaggle_setup, name,
+            (lambda n: (lambda: calls.append(n)))(name))
+
+    kaggle_setup.finish_setup()
+
+    assert calls[0] == "token", (
+        "finish_setup() must reload the HF token first, or preflight fails "
+        "after every kernel restart")
+    assert calls == ["token", "create_directories", "convert_asr_model",
+                     "preflight", "verify_imports", "verify_registry"]

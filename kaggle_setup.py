@@ -476,6 +476,7 @@ def bootstrap():
 
     # 1. NumPy ABI first: importing the vision stack under NumPy 2.x fails in
     #    confusing ways, and faster-whisper recurses inside numpy's dtype repr.
+    from runtime import NUMPY_ABI_LOCK
     import numpy as np
     if not np.__version__.startswith(NUMPY_ABI_LOCK):
         print(f"Pinning NumPy to {NUMPY_ABI_LOCK}.4 (found {np.__version__}) ...")
