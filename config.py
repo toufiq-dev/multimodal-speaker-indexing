@@ -33,6 +33,17 @@ def _auto_device() -> str:
     return "cpu"
 
 
+def _env_float(name: str, default: float) -> float:
+    """Float override from the environment; invalid values fall back."""
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
+
+
 def _is_kaggle() -> bool:
     return bool(os.environ.get("KAGGLE_KERNEL_RUN_TYPE")
                 or os.environ.get("KAGGLE_URL_BASE"))
@@ -93,14 +104,24 @@ class Config:
     LORA_PATH: str = ""
     BANGLABERT_NER_MODEL: str = "sagorsarker/banglabert-ner"
     BANGLABERT_NER_FALLBACK: str = "sagorsarker/mbert-bengali-ner"
-    FACE_SIM_THRESHOLD: float = 0.65
-    # Rejection gates for registry identity voting. Both default to 0.0
-    # (disabled) because shipping them at guessed values rejected *every* face
-    # match on a 7-photo registry and removed all real names from the output.
-    # They must be set from measured data, not guessed: run once and read
-    # `fusion_diagnostics.json`, which reports per speaker the max similarity,
-    # the runner-up gap, and the presence of the winning identity.
-    FACE_SIM_MARGIN: float = 0.0
+    # Cosine similarity at which a face is accepted as an enrolled identity.
+    #
+    # CALIBRATED FROM MEASUREMENT, not guessed. Matching the on-screen face at
+    # 12 timestamps of the RTV Goll Table episode against the reference photos
+    # gave genuine matches of 0.45–0.65 (the speaker against his own photo),
+    # while impostors scored 0.04–0.19 — a wide separation. The original 0.65
+    # sat ABOVE the entire genuine distribution, so the speaker's own face was
+    # rejected frame after frame and only the few strongest matches (a
+    # co-panelist) survived, absorbing his turns. 0.40 sits inside the gap.
+    FACE_SIM_THRESHOLD: float = field(
+        default_factory=lambda: _env_float("FACE_SIM_THRESHOLD", 0.40))
+    # Genuine matches lead the runner-up by 0.3–0.5; impostors by ~0.05. A
+    # margin of 0.10 rejects near-ties without touching a real match.
+    FACE_SIM_MARGIN: float = field(
+        default_factory=lambda: _env_float("FACE_SIM_MARGIN", 0.10))
+    # Keep 0.0: with correctly-identified faces, requiring a minimum presence
+    # would drop legitimate short turns. Calibrate from fusion_diagnostics.json
+    # if precision still needs raising.
     FACE_MIN_FRAME_FRACTION: float = 0.0
     VISION_FPS: int = 1
     # Active-speaker detection needs consecutive frames close enough in time to

@@ -90,15 +90,17 @@ def test_track_mean_embedding_is_none_without_embeddings():
 # ── track-level identity aggregation (vision) ──────────────────────────
 
 def test_track_aggregation_lifts_a_weak_per_frame_match(monkeypatch):
-    """Frames that individually miss the threshold can be named as a track.
+    """A track whose frames individually miss the threshold can still be named.
 
-    Reproduces why the speaking face contributed nothing before: each frame
-    scores 0.6 against the reference (threshold 0.65), but the track mean is
-    1.0. This is the mechanism that lets a badly-turned speaker be identified.
+    Each frame scores 0.6 against the reference while the acceptance threshold
+    is held at 0.65; the track mean is 1.0. This is the mechanism that lets a
+    badly-turned speaker be identified at all.
     """
     # engines.vision imports insightface/onnxruntime behind the NumPy ABI
     # guard; off the target environment the heavy native stack may be absent.
     monkeypatch.setenv("ALLOW_NUMPY_ABI_DRIFT", "1")
+    from config import config
+    monkeypatch.setattr(config, "FACE_SIM_THRESHOLD", 0.65)
     try:
         from engines.vision import _resolve_track_identities
     except Exception as exc:            # pragma: no cover - environment dependent

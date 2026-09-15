@@ -595,3 +595,40 @@ def test_kaggle_run_bootstraps_when_the_environment_is_not_ready(monkeypatch):
 
     assert mod.main() == 2
     assert calls == ["bootstrap"]
+
+
+# --------------------------------------------------------------------------
+# Face-similarity calibration.
+#
+# The original threshold (0.65) sat above the entire genuine-match
+# distribution measured on the RTV episode (0.45-0.65), so the speaker's own
+# face was rejected and a co-panelist absorbed his turns.
+# --------------------------------------------------------------------------
+
+def test_env_float_override_and_fallback(monkeypatch):
+    from config import _env_float
+
+    monkeypatch.delenv("MSI_TEST_FLOAT", raising=False)
+    assert _env_float("MSI_TEST_FLOAT", 0.40) == 0.40
+
+    monkeypatch.setenv("MSI_TEST_FLOAT", "0.25")
+    assert _env_float("MSI_TEST_FLOAT", 0.40) == 0.25
+
+    monkeypatch.setenv("MSI_TEST_FLOAT", "not-a-number")
+    assert _env_float("MSI_TEST_FLOAT", 0.40) == 0.40
+
+
+def test_face_threshold_defaults_are_calibrated(monkeypatch):
+    """The defaults must sit inside the measured genuine/impostor gap."""
+    import dataclasses
+
+    from config import Config
+
+    monkeypatch.delenv("FACE_SIM_THRESHOLD", raising=False)
+    monkeypatch.delenv("FACE_SIM_MARGIN", raising=False)
+    fields = {f.name: f for f in dataclasses.fields(Config)}
+
+    assert fields["FACE_SIM_THRESHOLD"].default_factory() == 0.40
+    assert fields["FACE_SIM_MARGIN"].default_factory() == 0.10
+    # 0.65 sat above every genuine match (max measured 0.645).
+    assert fields["FACE_SIM_THRESHOLD"].default_factory() < 0.65
