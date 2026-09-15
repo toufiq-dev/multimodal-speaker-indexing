@@ -343,7 +343,12 @@ def preflight():
     assert "CUDAExecutionProvider" in ort.get_available_providers(), (
         f"ORT is CPU-only ({ort.get_available_providers()}); a CPU onnxruntime "
         f"wheel is shadowing onnxruntime-gpu.")
-    assert os.environ.get("HF_TOKEN"), "HF_TOKEN unset — gated pyannote will 401."
+    assert os.environ.get("HF_TOKEN"), (
+        "HF_TOKEN unset — gated pyannote/speaker-diarization-3.1 will 401. "
+        "Fix: create an HF_TOKEN Kaggle Secret (account → Settings → Secrets), "
+        "attach it to this notebook (Add-ons → Secrets), accept the licence at "
+        "huggingface.co/pyannote/speaker-diarization-3.1 with that account, "
+        "then Runtime → Restart session and re-run bootstrap().")
 
     whisper_model = os.environ.get("WHISPER_MODEL", "")
     assert whisper_model and os.path.exists(os.path.join(whisper_model, "model.bin")), (
@@ -405,18 +410,109 @@ def verify_registry():
 # ==========================================================================
 
 def finish_setup():
-    """Run the post-install steps only: convert → preflight → verify.
+    """Run the post-install steps only: token → dirs → convert → preflight → verify.
 
     Use this AFTER a kernel restart. Pip installs persist on disk across a
     restart within the same session, but a NumPy downgrade (or any package the
     kernel imported before installing) only takes effect once the process is
     restarted. Re-running ``main()`` would redo ~20 minutes of installs; this
     runs only what is left.
+
+    The HF token MUST be reloaded here: a kernel restart clears ``os.environ``,
+    so the token that ``setup_hf_token()`` set during ``main()`` is gone.
     """
+    setup_hf_token()
+    create_directories()
     convert_asr_model()
     preflight()
     verify_imports()
     verify_registry()
+
+
+def _missing_deps() -> list:
+    """Names of required packages that cannot be imported in this process."""
+    missing = []
+    for mod in ("torch", "faster_whisper", "pyannote.audio", "insightface",
+                "onnxruntime", "transformers", "cv2"):
+        try:
+            __import__(mod)
+        except Exception:
+            missing.append(mod)
+    return missing
+
+
+def bootstrap():
+    """Idempotent, restart-safe setup — run this instead of ``main()``.
+
+    Inspects the session and performs only the missing work, so it is safe to
+    re-run after a kernel restart or a crash. Each branch prints the single
+    action to take next (usually "restart the kernel") rather than letting a
+    later stage fail with a cryptic error.
+
+    Order matters: the NumPy ABI is checked BEFORE importing the vision stack,
+    because a stale NumPy turns a version problem into misleading import
+    failures (and the RecursionError inside faster-whisper's feature extractor).
+
+    Preconditions — these are configuration, not bugs:
+      * Accelerator set to GPU T4 x2 and Internet ON.
+      * An ``HF_TOKEN`` Kaggle Secret attached to this notebook (Add-ons →
+        Secrets → attach), whose Hugging Face account has accepted the gated
+        licence at huggingface.co/pyannote/speaker-diarization-3.1.
+    """
+    create_directories()
+
+    token = setup_hf_token()
+    if not token:
+        print("\n" + "!" * 72)
+        print("HF_TOKEN is not set. Diarization (pyannote) is gated and cannot")
+        print("run without it. Do this, then restart the kernel and re-run:")
+        print("  1. kaggle.com → your account → Settings → Secrets → create")
+        print("     a secret named HF_TOKEN with your hf_... value.")
+        print("  2. In this notebook: Add-ons → Secrets → attach it.")
+        print("  3. Accept the licence at huggingface.co/pyannote/speaker-diarization-3.1")
+        print("     while signed in as that token's account.")
+        print("  4. Run → Restart session, then re-run bootstrap().")
+        print("!" * 72)
+
+    # 1. NumPy ABI first: importing the vision stack under NumPy 2.x fails in
+    #    confusing ways, and faster-whisper recurses inside numpy's dtype repr.
+    import numpy as np
+    if not np.__version__.startswith(NUMPY_ABI_LOCK):
+        print(f"Pinning NumPy to {NUMPY_ABI_LOCK}.4 (found {np.__version__}) ...")
+        _pip("install", f"numpy=={NUMPY_ABI_LOCK}.4")
+        print("\n" + "=" * 72)
+        print("NEXT ACTION: Runtime → Restart session, then re-run bootstrap().")
+        print("(A restart is required: Python keeps the already-imported NumPy.)")
+        print("=" * 72)
+        return
+
+    # 2. Dependencies.
+    missing = _missing_deps()
+    if missing:
+        print(f"Installing dependencies (missing: {missing}); ~15-20 min ...")
+        install_pytorch()
+        install_numpy()
+        install_insightface()
+        install_requirements()
+        fix_onnxruntime_conflict()
+        configure_cudnn_path()
+        print("\n" + "=" * 72)
+        print("NEXT ACTION: Runtime → Restart session, then re-run bootstrap().")
+        print("Dependencies are installed; the restart makes them visible to a")
+        print("fresh process (and re-loads NumPy 1.26.x).")
+        print("=" * 72)
+        return
+
+    # 3. The model-heavy tail.
+    ensure_ffmpeg()
+    convert_asr_model()
+    preflight()
+    verify_imports()
+    verify_registry()
+    print("\n" + "=" * 72)
+    print("✅ bootstrap complete — the environment is ready.")
+    print("Next: run the 30s ASR diagnostic, then scripts/run_episode.py.")
+    print("=" * 72)
 
 
 def main():
