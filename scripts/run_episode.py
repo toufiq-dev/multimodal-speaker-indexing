@@ -197,6 +197,28 @@ def _run_engines(
     print(f"    {len(faces)} face occurrences")
     release_gpu_memory()
 
+    # Per-track summary: frame counts, mouth motion and identity. This is the
+    # distribution needed to calibrate ASD_MIN_MOUTH_MOTION before the per-turn
+    # face override can be trusted (it ships disabled).
+    try:
+        from engines.active_speaker import (
+            group_by_track, track_identity, track_mean_motion)
+        tracks = {}
+        for tid, group in group_by_track(faces).items():
+            ident = track_identity(group)
+            tracks[str(tid)] = {
+                "n_frames": len(group),
+                "mean_mouth_motion": round(track_mean_motion(group), 4),
+                "identity": ident[0] if ident else "UNKNOWN",
+                "start": round(min(f.frame_time for f in group), 2),
+                "end": round(max(f.frame_time for f in group), 2),
+            }
+        (output_dir / "face_tracks.json").write_text(
+            json.dumps(tracks, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"    face_tracks.json <- {len(tracks)} tracks")
+    except Exception as e:
+        print(f"    track summary failed ({e.__class__.__name__}: {e})")
+
     print(f"[4] extracting speaker names from intro...")
     ordered_names = extract_speaker_names_from_intro(transcribed)
     print(f"    names: {ordered_names}")

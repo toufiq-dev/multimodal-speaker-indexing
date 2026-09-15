@@ -58,6 +58,29 @@ def _index_by_time(items: Iterable, key) -> Tuple[list, List[float]]:
     return ordered, [key(i) for i in ordered]
 
 
+def _turn_index_for_midpoint(mid: float, starts: List[float],
+                             ends: List[float]) -> Optional[int]:
+    """Index of the turn containing ``mid``, else of the nearest turn.
+
+    With overlapping turns the shortest containing turn wins (most specific),
+    matching the word→speaker rule used elsewhere.
+    """
+    if not starts:
+        return None
+    i = bisect_left(starts, mid)
+
+    containing = [j for j in (i - 1, i)
+                  if 0 <= j < len(starts) and starts[j] <= mid <= ends[j]]
+    if containing:
+        return min(containing, key=lambda j: ends[j] - starts[j])
+
+    candidates = [j for j in (i - 1, i, i + 1) if 0 <= j < len(starts)]
+    if not candidates:
+        return None
+    return min(candidates,
+               key=lambda j: min(abs(mid - starts[j]), abs(mid - ends[j])))
+
+
 class GatingFusion:
     """Deterministic multimodal identity resolver + final-segment builder.
 
@@ -355,9 +378,12 @@ class GatingFusion:
         self.last_diagnostics = self.registry_face_diagnostics(speaker_faces)
 
         # Per-turn identity from the speaking face track (active-speaker
-        # evidence). Empty when the faces carry no track information, in which
-        # case create_final_segments falls back to the per-speaker label.
-        self.turn_identities = self._turn_identities_from_tracks(diarization, faces)
+        # evidence). Off by default: the audio-derived per-speaker identity is
+        # correct once faces are calibrated, and a cutaway to a silent panellist
+        # would otherwise name the turn. See config.ENABLE_TURN_OVERRIDE.
+        self.turn_identities = (
+            self._turn_identities_from_tracks(diarization, faces)
+            if config.ENABLE_TURN_OVERRIDE else {})
 
         # Corroborated names: registry identities seen in the video plus the NER
         # output. A textual anchor matching one of these is trusted; anything
@@ -455,19 +481,32 @@ class GatingFusion:
         transcribed: List[TranscribedSegment],
         resolved_names: Dict[str, Tuple[str, float]],
     ) -> List[FinalSegment]:
-        """Exact construction: a turn's text = the words whose midpoint lies
-        inside the turn. Kills the duplication bug class by construction."""
-        finals: List[FinalSegment] = []
-        # Index words by midpoint once instead of regenerating the full word
-        # stream inside the per-turn loop.
-        ordered_words, word_mids = _index_by_time(
-            self._iter_words(transcribed), lambda w: (w.start + w.end) / 2.0)
+        """A turn's text = the words assigned to it; every word is emitted once.
 
-        for dia_seg in sorted(diarization, key=lambda d: d.start):
-            lo = bisect_left(word_mids, dia_seg.start)
-            hi = bisect_right(word_mids, dia_seg.end)
-            words_in_turn = ordered_words[lo:hi]
-            text = _norm(" ".join(w.word for w in words_in_turn))
+        Words whose midpoint falls in NO turn were previously discarded. Whisper
+        transcribes across the gaps between diarization turns (and pyannote
+        leaves ~5% of the timeline uncovered), so real speech silently vanished
+        from the subtitles. Each word is now attached to the temporally nearest
+        turn when no turn contains it, so the output accounts for every
+        transcribed word exactly once — duplication is still impossible.
+        """
+        diag = sorted(diarization, key=lambda d: d.start)
+        if not diag:
+            return []
+        starts = [d.start for d in diag]
+        ends = [d.end for d in diag]
+
+        buckets: Dict[int, List] = {}
+        for word in self._iter_words(transcribed):
+            mid = (word.start + word.end) / 2.0
+            idx = _turn_index_for_midpoint(mid, starts, ends)
+            if idx is not None:
+                buckets.setdefault(idx, []).append(word)
+
+        finals: List[FinalSegment] = []
+        for idx in sorted(buckets):
+            dia_seg = diag[idx]
+            text = _norm(" ".join(w.word for w in buckets[idx]))
             if not text:
                 continue
             speaker_name, confidence = self._name_for_turn(dia_seg, resolved_names)

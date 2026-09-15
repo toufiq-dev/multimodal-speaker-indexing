@@ -179,14 +179,19 @@ def _one_turn():
     return [DiarizationSegment(0.0, 30.0, "SPEAKER_00")]
 
 
-def test_turn_uses_the_speaking_track_when_that_identity_is_supported():
+def test_turn_uses_the_speaking_track_when_that_identity_is_supported(monkeypatch):
     """Motion decides the turn, provided the identity is established elsewhere.
 
     A still listener outmatches the speaker within this turn, but the speaker's
     identity is dominant for another diarization speaker, so the speaking track
-    may name the turn. (An identity that never wins any speaker is refused —
-    see test_identity_that_never_wins_a_speaker_cannot_name_a_turn.)
+    may name the turn. An identity that never wins any speaker is refused — see
+    test_identity_that_never_wins_a_speaker_cannot_name_a_turn.
+
+    The override ships disabled, so it is enabled here explicitly.
     """
+    from config import config
+    monkeypatch.setattr(config, "ENABLE_TURN_OVERRIDE", True)
+
     dia = [DiarizationSegment(0.0, 30.0, "SPEAKER_00"),
            DiarizationSegment(30.0, 60.0, "SPEAKER_01")]
     faces = []
@@ -207,6 +212,32 @@ def test_turn_uses_the_speaking_track_when_that_identity_is_supported():
               _seg(30, 60, "SPEAKER_01", "আরও কথা")], resolved)
     by_start = {round(f.start, 1): f.speaker for f in finals}
     assert by_start[0.0] == "Tushar"
+
+
+def test_turn_override_is_off_by_default():
+    """A cutaway to a silent co-panelist must not name the speaker's turn.
+
+    This is what produced Shahriar's name over Tushar's speech: the camera was
+    on a still listener, whose face was the only track in the turn. The override
+    ships disabled, so the audio-derived speaker label is used instead.
+    """
+    dia = _one_turn()
+    faces = []
+    for i in range(10):    # the speaker's own frames dominate this turn
+        faces.append(_trackface(i * 0.5, track=1, motion=0.0,
+                                name="Tushar", conf=0.55))
+    for i in range(5):     # a cutaway to a moving co-panelist
+        faces.append(_trackface(1.0 + i * 0.5, track=2, motion=0.40,
+                                name="Shahriar", conf=0.70))
+
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+
+    assert fusion.turn_identities == {}          # override disabled
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+    # The audio-derived speaker label wins, not the moving face on screen.
+    assert finals[0].speaker == "Tushar"
 
 
 def test_without_track_information_the_speaker_label_is_used():
@@ -256,6 +287,30 @@ def test_background_mover_does_not_name_the_turn():
     finals = fusion.create_final_segments(
         dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
     assert finals[0].speaker == "Tushar"
+
+
+def test_words_outside_every_turn_are_not_dropped():
+    """Whisper transcribes across diarization gaps; those words must survive.
+
+    pyannote leaves ~5% of the timeline uncovered and Whisper does not stop at
+    turn boundaries, so words with no containing turn used to disappear from
+    the subtitles. They are now attached to the nearest turn.
+    """
+    dia = [DiarizationSegment(0.0, 5.0, "SPEAKER_00"),
+           DiarizationSegment(10.0, 15.0, "SPEAKER_01")]
+    words = [
+        WordToken(word="প্রথম", start=1.0, end=1.5),    # inside turn 0
+        WordToken(word="মাঝে", start=6.0, end=6.5),     # in the gap
+        WordToken(word="শেষ", start=12.0, end=12.5),    # inside turn 1
+    ]
+    trans = [TranscribedSegment(start=1.0, end=12.5, text="প্রথম মাঝে শেষ",
+                                words=words, speaker_id="SPEAKER_00")]
+
+    finals = GatingFusion().create_final_segments(
+        dia, trans, {"SPEAKER_00": ("A", 0.9), "SPEAKER_01": ("B", 0.9)})
+
+    text = " ".join(f.text for f in finals)
+    assert "প্রথম" in text and "মাঝে" in text and "শেষ" in text
 
 
 def test_identity_that_never_wins_a_speaker_cannot_name_a_turn():

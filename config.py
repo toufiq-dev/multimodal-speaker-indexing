@@ -142,6 +142,17 @@ class Config:
     # programme, and the host over a co-panelist's turns).
     ASD_MIN_TRACK_PRESENCE: float = field(
         default_factory=lambda: _env_float("ASD_MIN_TRACK_PRESENCE", 0.30))
+    # Per-turn identity taken from the visible speaking face, overriding the
+    # audio-derived speaker label.
+    #
+    # OFF by default. With the face threshold calibrated the per-speaker
+    # (audio) identity is already correct, and the override actively hurt: when
+    # the camera cut to a *silent* co-panelist during a turn, that still face
+    # was the only track present, so it named the turn after whoever was on
+    # screen. Turn it on only once ASD_MIN_MOUTH_MOTION can be calibrated from
+    # the per-track motion distribution written to face_tracks.json.
+    ENABLE_TURN_OVERRIDE: bool = field(
+        default_factory=lambda: os.getenv("ENABLE_TURN_OVERRIDE", "0") == "1")
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3
