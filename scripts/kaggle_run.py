@@ -79,13 +79,53 @@ def report() -> None:
         print("ort          : ERROR", exc)
 
 
+def summarize(out_dir: str) -> None:
+    """Print the health block and the per-speaker table for an episode."""
+    import json
+
+    result_path = os.path.join(out_dir, "result.json")
+    if not os.path.exists(result_path):
+        print("no result.json at", result_path)
+        return
+    with open(result_path, encoding="utf-8") as fh:
+        res = json.load(fh)
+
+    health_path = os.path.join(out_dir, "health.json")
+    if os.path.exists(health_path):
+        with open(health_path, encoding="utf-8") as fh:
+            print(fh.read())
+
+    durations: dict = {}
+    for s in res:
+        durations[s["speaker"]] = durations.get(s["speaker"], 0.0) + (s["end"] - s["start"])
+
+    print(f"\nsegments: {len(res)}")
+    print(f"{'speaker':<36}{'segs':>5}{'secs':>8}{'mean_conf':>11}")
+    for spk, dur in sorted(durations.items(), key=lambda kv: -kv[1]):
+        segs = [s for s in res if s["speaker"] == spk]
+        mean_conf = sum(s["confidence"] for s in segs) / len(segs)
+        print(f"{spk:<36}{len(segs):>5}{dur:>8.1f}{mean_conf:>11.3f}")
+
+    print("\nfirst 12 segments:")
+    for s in res[:12]:
+        print(f"[{s['start']:6.1f}-{s['end']:6.1f}] "
+              f"{s['speaker'][:30]:<30} {s['text'][:60]}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--id", default="episode")
     ap.add_argument("--registry", default="/kaggle/working/registry/rtv_goll_table")
     ap.add_argument("--video", default=None)
     ap.add_argument("--no-rag", action="store_true")
+    ap.add_argument("--report-only", action="store_true",
+                    help="Skip the run; just summarise an existing output dir.")
     args = ap.parse_args()
+
+    out_dir = f"/kaggle/working/output/{args.id}"
+    if args.report_only:
+        summarize(out_dir)
+        return 0
 
     report()
 
@@ -130,7 +170,12 @@ def main() -> int:
     rc = subprocess.call(cmd)
     print("\n=== PIPELINE EXIT:", rc, "===")
     if rc == 0:
-        print(f"outputs: /kaggle/working/output/{args.id}/")
+        print(f"outputs: {out_dir}/")
+        print("\n=== RESULT ===")
+        summarize(out_dir)
+    else:
+        print("Run failed. Re-run with the same command after fixing the error above,")
+        print("or inspect an existing run with:  --report-only")
     return rc
 
 
