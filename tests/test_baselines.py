@@ -179,10 +179,20 @@ class TestAblateNoFaces:
         finals = ablate_no_faces(dia, trans)
         assert all(f.speaker != "ShouldBeIgnored" for f in finals)
 
-    def test_anchor_still_works(self):
+    def test_anchor_requires_corroboration(self):
+        # Two production runs emitted fragments of running speech as speaker
+        # names ('কলকাতা দল গেছিলাম তখন', 'গিয়েছি তদ্বির করতে', 'আর'), so an
+        # anchor is trusted only when corroborated by a registry identity or an
+        # NER name. With neither, the speaker must stay generic.
         dia = [_dia(0, 10, "SPEAKER_00")]
         trans = [_trans(0, 10, "SPEAKER_00", "আমি রফতান")]
         finals = ablate_no_faces(dia, trans)
+        assert all(f.speaker != "রফতান" for f in finals)
+
+    def test_anchor_works_when_corroborated(self):
+        dia = [_dia(0, 10, "SPEAKER_00")]
+        trans = [_trans(0, 10, "SPEAKER_00", "আমি রফতান")]
+        finals = ablate_no_faces(dia, trans, ordered_names=["রফতান"])
         assert any("রফতান" in f.speaker for f in finals)
 
 
@@ -206,12 +216,14 @@ class TestAblateNoNlp:
         assert len(finals) >= 1
 
     def test_anchor_extraction_still_works(self):
-        # Anchor extraction is independent of ordered_names
+        # Anchor extraction is independent of ordered_names, but its *output*
+        # is trusted only when corroborated. With ordered_names=[] and no
+        # registry faces there is nothing to corroborate it, so no name is
+        # asserted — the configuration that produced garbage labels.
         dia = [_dia(0, 10, "SPEAKER_00")]
         trans = [_trans(0, 10, "SPEAKER_00", "আমি রফতান")]
         finals = ablate_no_nlp(dia, trans)
-        # Anchor (Pass 2) still fires → name resolved
-        assert any("রফতান" in f.speaker for f in finals)
+        assert all(f.speaker != "রফতান" for f in finals)
 
 
 # ── oracle_labels (A3) ────────────────────────────────────────────────

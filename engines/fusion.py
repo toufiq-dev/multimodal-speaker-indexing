@@ -207,12 +207,18 @@ class GatingFusion:
         presenter says "আমি X" while speaking -- direct first-person evidence.
         Name capture/trimming logic lives in engines.nlp (single source).
 
-        ``known_names`` (registry identities + NER output) lets a capture be
-        accepted on corroboration alone; without it, a capture must look like a
-        name, because an unvalidated clause from running speech must never
-        become a speaker label.
+        ``known_names`` (registry identities + NER output) is REQUIRED: a
+        capture is only accepted when it matches one of them. Two consecutive
+        runs emitted fragments of running speech ("কলকাতা দল গেছিলাম তখন",
+        "গিয়েছি তদ্বির করতে", "বলে দিচ্ছি", "যখন", "আর") as speaker names, so
+        an unvalidated 'আমি <clause>' is no longer trusted at all. The
+        extractor still proposes candidates; the decision to trust one lives
+        here, in identity resolution.
         """
         from engines.nlp import extract_anchor_names_from_text  # lazy: avoids heavy import at module load
+
+        if not known_names:
+            return []
 
         hits: Dict[Tuple[str, str], int] = {}
         for tseg in transcribed:
@@ -220,6 +226,8 @@ class GatingFusion:
             if not spk or spk == "UNKNOWN":
                 continue
             for name in extract_anchor_names_from_text(tseg.text, known_names):
+                if name not in known_names:
+                    continue
                 hits[(spk, name)] = hits.get((spk, name), 0) + 1
         return sorted(
             ((spk, name, n) for (spk, name), n in hits.items()),

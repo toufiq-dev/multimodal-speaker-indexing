@@ -17,14 +17,25 @@ def _seg(start, end, spk, text):
 
 
 def test_host_anchor_identifies_self_introduction():
+    # An anchor is trusted only when corroborated by a registry identity or an
+    # NER name: two runs showed unvalidated 'আমি <clause>' captures becoming
+    # speaker labels. Here the NER list supplies the corroboration.
     trans = [
         _seg(0, 20, "SPEAKER_00",
              "আপনাদের সাথে আছে আমি রফতান আঞ্জুমান নিকোল"),
         _seg(30, 50, "SPEAKER_01", "আমি মনে করি এটা ঠিক নয়"),
     ]
-    resolved = GatingFusion().resolve_identities(DIA, trans, [])
+    resolved = GatingFusion(
+        ordered_names=["রফতান আঞ্জুমান নিকোল"]).resolve_identities(DIA, trans, [])
     assert resolved["SPEAKER_00"][0] == "রফতান আঞ্জুমান নিকোল"
     assert resolved["SPEAKER_00"][1] >= 0.6
+
+
+def test_uncorroborated_anchor_is_not_used():
+    """Even a real-looking name is refused without corroboration."""
+    trans = [_seg(0, 20, "SPEAKER_00", "আমি রফতান আঞ্জুমান নিকোল")]
+    resolved = GatingFusion().resolve_identities(DIA, trans, [])
+    assert resolved["SPEAKER_00"][0].startswith("Speaker_")
 
 
 def test_cooccurrence_beats_positional_matching():
@@ -128,7 +139,7 @@ def test_uncorroborated_anchor_is_not_a_speaker_label():
     ]
     resolved = GatingFusion().resolve_identities(DIA, trans, [])
     names = [v[0] for v in resolved.values()]
-    for bad in ("গিয়েছি তদ্বির করতে", "বলে দিচ্ছি", "যখন", "তদ্বির"):
+    for bad in ("গিয়েছি তদ্বির করতে", "বলে দিচ্ছি", "যখন", "তদ্বির", "আর"):
         assert bad not in names, f"{bad!r} leaked into the speaker labels"
     assert any(n.startswith("Speaker_") for n in names)
 

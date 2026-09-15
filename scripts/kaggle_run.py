@@ -135,6 +135,23 @@ def summarize(out_dir: str) -> None:
         print(f"[{s['start']:6.1f}-{s['end']:6.1f}] "
               f"{s['speaker'][:30]:<30} {s['text'][:60]}")
 
+    # The face evidence behind identity resolution. This is the data needed to
+    # set FACE_SIM_MARGIN / FACE_MIN_FRAME_FRACTION from measurements.
+    diag_path = os.path.join(out_dir, "fusion_diagnostics.json")
+    if os.path.exists(diag_path):
+        with open(diag_path, encoding="utf-8") as fh:
+            diag = json.load(fh)
+        print("\n=== FACE DIAGNOSTICS (per diarization speaker) ===")
+        print(f"{'speaker':<14}{'faces':>6}{'winner':<30}"
+              f"{'presence':>9}{'margin':>8}{'best':>7}  votes")
+        for spk, d in sorted(diag.items()):
+            print(f"{spk:<14}{d.get('n_faces', 0):>6}"
+                  f"{str(d.get('winner'))[:28]:<30}"
+                  f"{d.get('winner_presence', 0):>9}"
+                  f"{d.get('best_margin', 0):>8}"
+                  f"{d.get('best_sim', 0):>7}"
+                  f"  {d.get('votes', {})}")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
