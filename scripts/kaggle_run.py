@@ -79,6 +79,30 @@ def report() -> None:
         print("ort          : ERROR", exc)
 
 
+def export_cudnn_path() -> str | None:
+    """Put torch's bundled cuDNN 9 on LD_LIBRARY_PATH for child processes.
+
+    CTranslate2 ``dlopen``s cuDNN, and glibc fixes the library search path at
+    process start — so this must be in the environment *before* the pipeline
+    subprocess launches, not set inside it.
+    """
+    try:
+        from runtime import cudnn_library_dir
+    except Exception as exc:
+        print("cudnn path   : ERROR", exc)
+        return None
+    lib = cudnn_library_dir()
+    if not lib:
+        print("cudnn path   : not found in the torch wheel")
+        return None
+    current = os.environ.get("LD_LIBRARY_PATH", "")
+    if lib not in current.split(os.pathsep):
+        os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+            p for p in (lib, current) if p)
+    print("cudnn path   :", lib)
+    return lib
+
+
 def summarize(out_dir: str) -> None:
     """Print the health block and the per-speaker table for an episode."""
     import json
@@ -128,6 +152,7 @@ def main() -> int:
         return 0
 
     report()
+    export_cudnn_path()
 
     ct2_ok = os.path.exists(os.path.join(ks.CT2_DIR, "model.bin"))
     print("ct2 model    :", ks.CT2_DIR, "->", ct2_ok)

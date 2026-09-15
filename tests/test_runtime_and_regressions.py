@@ -525,6 +525,40 @@ def test_run_episode_rejects_a_missing_video(monkeypatch, tmp_path):
 def test_kaggle_run_script_loads_and_is_safe_without_kaggle():
     """kaggle_run.py must import cleanly and not scan /kaggle when told a path."""
     mod = _load_script("kaggle_run")
-    for name in ("main", "find_video", "ensure_registry", "report"):
+    for name in ("main", "find_video", "ensure_registry", "report",
+                 "export_cudnn_path", "summarize"):
         assert callable(getattr(mod, name)), f"kaggle_run.{name} missing"
     assert mod.find_video("/definitely/not/here.mp4") is None
+
+
+def test_ensure_cudnn_on_loader_path_is_idempotent(monkeypatch):
+    """The cuDNN re-exec guard: set once, then report 'already present'.
+
+    CTranslate2 dlopens cuDNN and glibc fixes the search path at process
+    start, so the path must be exported before the process begins — and the
+    helper must not ask for a re-exec once it is there (that would loop).
+    """
+    import os as _os
+    import runtime
+
+    mod = _load_script("run_episode")
+    monkeypatch.setattr(runtime, "cudnn_library_dir", lambda: "/opt/fake/cudnn")
+
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/fake/cudnn")
+    assert mod._ensure_cudnn_on_loader_path() is False
+
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/other")
+    assert mod._ensure_cudnn_on_loader_path() is True
+    assert _os.environ["LD_LIBRARY_PATH"].split(_os.pathsep)[0] == "/opt/fake/cudnn"
+
+
+def test_kaggle_run_exports_cudnn_path_for_children(monkeypatch):
+    import os as _os
+    import runtime
+
+    mod = _load_script("kaggle_run")
+    monkeypatch.setattr(runtime, "cudnn_library_dir", lambda: "/opt/fake/cudnn2")
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+
+    assert mod.export_cudnn_path() == "/opt/fake/cudnn2"
+    assert _os.environ["LD_LIBRARY_PATH"] == "/opt/fake/cudnn2"

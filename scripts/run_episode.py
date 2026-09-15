@@ -298,6 +298,33 @@ def _record(
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _ensure_cudnn_on_loader_path() -> bool:
+    """Export torch's bundled cuDNN 9 onto ``LD_LIBRARY_PATH``.
+
+    CTranslate2 resolves cuDNN with ``dlopen``. glibc captures the library
+    search path at **process start**, so setting ``LD_LIBRARY_PATH`` later in
+    the same process has no effect — the load fails with
+    ``Unable to load any of {libcudnn_cnn.so.9...}``. The only reliable fix is
+    to put the directory in the environment and re-exec, so the child's loader
+    sees it from the beginning.
+
+    Returns True when the environment was changed (caller must re-exec).
+    """
+    try:
+        from runtime import cudnn_library_dir
+    except Exception:
+        return False
+    lib = cudnn_library_dir()
+    if not lib:
+        return False
+    current = os.environ.get("LD_LIBRARY_PATH", "")
+    if lib in current.split(os.pathsep):
+        return False
+    os.environ["LD_LIBRARY_PATH"] = os.pathsep.join(
+        p for p in (lib, current) if p)
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("video", help="Input video file")
@@ -312,6 +339,14 @@ def main() -> int:
     ap.add_argument("--force", action="store_true",
                     help="Re-run even if cached audio/frames exist")
     args = ap.parse_args()
+
+    # cuDNN 9 must be on the loader path from process start (see the docstring
+    # on _ensure_cudnn_on_loader_path). Re-exec once; the guard flag prevents a
+    # loop if the loader still cannot find it.
+    if os.environ.get("MSI_CUDNN_REEXEC") != "1" and _ensure_cudnn_on_loader_path():
+        os.environ["MSI_CUDNN_REEXEC"] = "1"
+        print("[run_episode] re-exec with LD_LIBRARY_PATH for cuDNN 9")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     video = Path(args.video).resolve()
     if not video.exists():
