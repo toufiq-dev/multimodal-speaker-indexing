@@ -297,6 +297,12 @@ def test_conversion_script_does_not_hardcode_a_local_venv():
 def test_bootstrap_selects_the_converted_ct2_directory(tmp_path, monkeypatch):
     import kaggle_setup
 
+    # This test exercises CT2 selection, not the NumPy ABI guard (which has
+    # its own test). convert_asr_model() asserts the ABI because a stale
+    # in-memory NumPy breaks faster-whisper's feature extractor with a cryptic
+    # RecursionError; bypass it here so the mocked probe can run.
+    monkeypatch.setenv("ALLOW_NUMPY_ABI_DRIFT", "1")
+
     model_dir = tmp_path / "bengaliAI_ct2"
     model_dir.mkdir()
     (model_dir / "model.bin").write_bytes(b"stub")
@@ -319,6 +325,10 @@ def test_bootstrap_selects_the_converted_ct2_directory(tmp_path, monkeypatch):
 
 def test_bootstrap_rejects_an_english_only_conversion(tmp_path, monkeypatch):
     import kaggle_setup
+
+    # See the note in test_bootstrap_selects_the_converted_ct2_directory:
+    # this test targets the English-only rejection, not the ABI guard.
+    monkeypatch.setenv("ALLOW_NUMPY_ABI_DRIFT", "1")
 
     model_dir = tmp_path / "en_only_ct2"
     model_dir.mkdir()

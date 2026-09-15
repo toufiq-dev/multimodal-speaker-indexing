@@ -257,6 +257,26 @@ def convert_asr_model():
 
     Set ``CT2_MODEL_DIR`` to reuse a conversion from a Kaggle dataset instead.
     """
+    # Importing faster-whisper builds its FeatureExtractor, which does
+    # Mel-filterbank math through NumPy. If this *process* already imported a
+    # different NumPy than the one pip just installed on disk (the Kaggle base
+    # image ships NumPy 2.x, while this repo pins 1.26.x), those ops fail and
+    # surface as a cryptic RecursionError deep inside numpy's dtype repr
+    # (``freqs.reshape(-1,1) - fftfreqs.reshape(1,-1)`` -> dtype repr loop).
+    # Assert first so the message says what to actually do: restart the kernel.
+    from runtime import NUMPY_ABI_LOCK, assert_numpy_abi
+    try:
+        assert_numpy_abi()
+    except RuntimeError as e:
+        import numpy as _np
+        raise RuntimeError(
+            f"{e}\n\nNumPy {_np.__version__} is loaded in this kernel, but this "
+            f"repo requires {NUMPY_ABI_LOCK}.x. Pip may have already downgraded the "
+            f"file on disk, but Python keeps the *already-imported* module in "
+            f"memory. Fix: Runtime → Restart session, then re-run the setup — the "
+            f"packages are installed, so the restart is cheap."
+        ) from e
+
     out = os.environ.get("CT2_MODEL_DIR", CT2_DIR)
     weights = os.path.join(out, "model.bin")
 
@@ -384,6 +404,21 @@ def verify_registry():
 # MAIN
 # ==========================================================================
 
+def finish_setup():
+    """Run the post-install steps only: convert → preflight → verify.
+
+    Use this AFTER a kernel restart. Pip installs persist on disk across a
+    restart within the same session, but a NumPy downgrade (or any package the
+    kernel imported before installing) only takes effect once the process is
+    restarted. Re-running ``main()`` would redo ~20 minutes of installs; this
+    runs only what is left.
+    """
+    convert_asr_model()
+    preflight()
+    verify_imports()
+    verify_registry()
+
+
 def main():
     clone_repository()
     install_pytorch()
@@ -396,10 +431,7 @@ def main():
     setup_hf_token()
     create_directories()
     download_dataset()
-    convert_asr_model()
-    preflight()
-    verify_imports()
-    verify_registry()
+    finish_setup()
 
     print("""
 =============================================================================
