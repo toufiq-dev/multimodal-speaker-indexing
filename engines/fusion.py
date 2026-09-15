@@ -67,6 +67,9 @@ class GatingFusion:
 
     def __init__(self, ordered_names: Optional[List[str]] = None):
         self.ordered_names = ordered_names or []
+        #: Per-speaker face evidence from the last resolve_identities() call,
+        #: persisted by callers for threshold calibration.
+        self.last_diagnostics: Dict[str, Dict] = {}
 
     # ------------------------------------------------------------------
     # Evidence collection
@@ -152,10 +155,50 @@ class GatingFusion:
             out[spk] = (label, c[label])
         return out
 
+    def registry_face_diagnostics(
+        self, speaker_faces: Dict[str, List[FaceOccurrence]]
+    ) -> Dict[str, Dict]:
+        """Per-speaker face evidence, for calibrating the rejection gates.
+
+        Reports how many faces were detected per diarization speaker, which
+        identities they voted for, the mean similarity per identity, and the
+        top-1 / runner-up gap on the best face. Persisted as
+        ``fusion_diagnostics.json`` so ``FACE_SIM_MARGIN`` and
+        ``FACE_MIN_FRAME_FRACTION`` are chosen from measured gaps instead of
+        guesses — guessing them once removed every real name from the output.
+        """
+        diag: Dict[str, Dict] = {}
+        for spk, occs in speaker_faces.items():
+            votes: Dict[str, int] = {}
+            sims: Dict[str, List[float]] = {}
+            best_sim, best_runner = 0.0, 0.0
+            for f in occs:
+                fid = f.resolved_face_id
+                if fid == "UNKNOWN" or fid.startswith("face_cluster_"):
+                    continue
+                votes[fid] = votes.get(fid, 0) + 1
+                sims.setdefault(fid, []).append(f.face_confidence)
+                if f.face_confidence > best_sim:
+                    best_sim, best_runner = f.face_confidence, f.runner_up_confidence
+            winner = max(votes, key=lambda n: votes[n]) if votes else None
+            diag[spk] = {
+                "n_faces": len(occs),
+                "votes": votes,
+                "mean_sim": {k: round(sum(v) / len(v), 3) for k, v in sims.items()},
+                "winner": winner,
+                "winner_presence": (
+                    round(votes[winner] / len(occs), 3) if winner and occs else 0.0),
+                "best_sim": round(best_sim, 3),
+                "best_runner_up": round(best_runner, 3),
+                "best_margin": round(best_sim - best_runner, 3),
+            }
+        return diag
+
     @staticmethod
     def _host_anchor_evidence(
         diarization: List[DiarizationSegment],
         transcribed: List[TranscribedSegment],
+        known_names: Optional[set] = None,
     ) -> List[Tuple[str, str, int]]:
         """Find 'আমি <Name>' self-introductions.
 
@@ -163,6 +206,11 @@ class GatingFusion:
         This is the primary textual anchor for identifying the HOST, since a
         presenter says "আমি X" while speaking -- direct first-person evidence.
         Name capture/trimming logic lives in engines.nlp (single source).
+
+        ``known_names`` (registry identities + NER output) lets a capture be
+        accepted on corroboration alone; without it, a capture must look like a
+        name, because an unvalidated clause from running speech must never
+        become a speaker label.
         """
         from engines.nlp import extract_anchor_names_from_text  # lazy: avoids heavy import at module load
 
@@ -171,7 +219,7 @@ class GatingFusion:
             spk = tseg.speaker_id
             if not spk or spk == "UNKNOWN":
                 continue
-            for name in extract_anchor_names_from_text(tseg.text):
+            for name in extract_anchor_names_from_text(tseg.text, known_names):
                 hits[(spk, name)] = hits.get((spk, name), 0) + 1
         return sorted(
             ((spk, name, n) for (spk, name), n in hits.items()),
@@ -235,6 +283,22 @@ class GatingFusion:
 
         speaker_faces = self._aggregate_faces_per_speaker(diarization, faces)
 
+        # Face evidence per speaker, recorded for calibration. Callers persist
+        # this (run_episode writes fusion_diagnostics.json) so the margin and
+        # presence thresholds can be chosen from measured gaps rather than
+        # guessed — guessing them once removed every real name from the output.
+        self.last_diagnostics = self.registry_face_diagnostics(speaker_faces)
+
+        # Corroborated names: registry identities seen in the video plus the NER
+        # output. A textual anchor matching one of these is trusted; anything
+        # else must look like a name on its own.
+        registry_names = {
+            f.resolved_face_id for f in faces
+            if f.resolved_face_id != "UNKNOWN"
+            and not f.resolved_face_id.startswith("face_cluster_")
+        }
+        known_names = set(self.ordered_names) | registry_names
+
         # Pass 1: registry faces.
         reg = self._best_registry_face_per_speaker(speaker_faces)
         for spk in speaker_ids:
@@ -247,7 +311,8 @@ class GatingFusion:
                     used_names.add(name)
 
         # Pass 2: host self-intro anchor.
-        for spk, name, hit_count in self._host_anchor_evidence(diarization, transcribed):
+        for spk, name, hit_count in self._host_anchor_evidence(
+                diarization, transcribed, known_names):
             if spk in resolved or name in used_names or hit_count < 1:
                 continue
             conf = min(0.95, 0.6 + 0.1 * hit_count)
@@ -421,3 +486,19 @@ def run_fusion_pipeline(
     resolved = fusion.resolve_identities(
         diarization, transcribed, faces, ground_truth_labels=ground_truth_labels)
     return fusion.create_final_segments(diarization, transcribed, resolved)
+
+
+def fusion_diagnostics(
+    diarization: List[DiarizationSegment],
+    faces: List[FaceOccurrence],
+    ordered_names: Optional[List[str]] = None,
+) -> Dict[str, Dict]:
+    """Per-speaker face evidence, for choosing the registry rejection gates.
+
+    Run the pipeline once, read ``fusion_diagnostics.json``, and set
+    ``FACE_SIM_MARGIN`` / ``FACE_MIN_FRAME_FRACTION`` from the observed
+    ``best_margin`` and ``winner_presence`` distributions — never by guessing.
+    """
+    fusion = GatingFusion(ordered_names=ordered_names)
+    speaker_faces = fusion._aggregate_faces_per_speaker(diarization, faces)
+    return fusion.registry_face_diagnostics(speaker_faces)

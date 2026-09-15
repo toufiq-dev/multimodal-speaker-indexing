@@ -107,6 +107,21 @@ class TestExtractAnchorNames:
         assert extract_anchor_names_from_text(
             "আমি কলকাতা দল গেছিলাম তখন") == []
 
+    def test_verb_phrases_are_not_names(self):
+        # The v2 RTV run emitted these three as speaker labels. A lexicon alone
+        # cannot cover running speech; the verb-ending test rejects them.
+        for text in ("আমি গিয়েছি তদ্বির করতে",
+                     "আমি বলে দিচ্ছি",
+                     "আমি যখন"):
+            assert extract_anchor_names_from_text(text) == [], text
+
+    def test_corroborated_capture_is_accepted(self):
+        # A capture that fails the name-likeness heuristics is still trusted
+        # when it matches a known name (registry identity or NER output).
+        text = "আমি দিচ্ছি"
+        assert extract_anchor_names_from_text(text) == []
+        assert extract_anchor_names_from_text(text, {"দিচ্ছি"}) == ["দিচ্ছি"]
+
     def test_punctuation_breaks_capture(self):
         # Bengali danda (।) is not in [\u0980-\u09FF ] so it stops the regex
         names = extract_anchor_names_from_text("আমি রফতান। বাকি কথা")

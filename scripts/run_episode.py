@@ -200,6 +200,17 @@ def _run_engines(
         diarization, transcribed, faces, ordered_names)
     print(f"    {len(final_segments)} final segments")
 
+    # Persist the face evidence behind identity resolution. The registry
+    # rejection gates must be set from these measured gaps, not guessed.
+    try:
+        from engines.fusion import fusion_diagnostics
+        diag = fusion_diagnostics(diarization, faces, ordered_names)
+        (output_dir / "fusion_diagnostics.json").write_text(
+            json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"    fusion_diagnostics.json <- {len(diag)} speakers")
+    except Exception as e:
+        print(f"    diagnostics failed ({e.__class__.__name__}: {e})")
+
     _write_json(final_segments, output_dir / "result.json")
     _write_srt(final_segments, output_dir / "subtitles.srt")
 

@@ -36,12 +36,9 @@ _POST_AMI_STOPWORDS = {
     "এই", "ওই", "সেই", "প্রথম", "শেষ", "আবার",
 }
 
-#: Tokens that must never appear inside a captured "name". The anchor regex is
-#: deliberately greedy (a non-greedy quantifier captured only two characters),
-#: so trimming against a small stopword list is not enough: the clause
-#: "আমি কলকাতা দল গেছিলাম তখন" was accepted as a name and became a speaker
-#: label in the output. A roster/NER corroboration gate would be the principled
-#: long-term fix; this negative lexicon plus the token cap is the practical one.
+#: Tokens that must never appear inside a captured "name". A negative lexicon
+#: alone is not sufficient — running speech contains unbounded vocabulary — so
+#: it is combined with a verb-suffix test and with corroboration.
 _NON_NAME_WORDS = {
     # places / geography
     "কলকাতা", "ঢাকা", "চট্টগ্রাম", "খুলনা", "রাজশাহী", "সিলেট", "বরিশাল",
@@ -51,21 +48,41 @@ _NON_NAME_WORDS = {
     # common content words observed after "আমি" in running speech
     "দল", "গেছিলাম", "তখন", "বছর", "ধরে", "কথা", "বিষয়", "নির্বাচন",
     "সরকার", "সংবাদ", "খবর", "সময়", "লোক", "মানুষ", "বক্তব্য",
+    # adverbs / interrogatives — the RTV run emitted "যখন" as a speaker name
+    "যখন", "সেখানে", "এখানে", "কোথায়", "কেন", "কীভাবে", "তদ্বির",
     # self-reference / pronouns
     "আমি", "আমরা", "আমার", "আমাকে", "আমাদের", "আপনি", "তিনি", "তারা",
 }
+
+#: Bengali verb / verbal-noun endings. A person's name does not end in these.
+#: This is what catches clauses a word list misses: the RTV run emitted
+#: "গিয়েছি তদ্বির করতে" and "বলে দিচ্ছি" as speaker names.
+_VERB_SUFFIXES = (
+    "েছি", "চ্ছি", "লাম", "লেন", "বেন", "ছি", "চ্ছে",
+    "য়েছে", "য়েছি", "য়েছিলেন", "লে", "তে", "বে", "ছে",
+)
 _MAX_NAME_WORDS = 3
 
 
-def _plausible_name(tokens: List[str]) -> bool:
+def _plausible_name(tokens: List[str],
+                    known_names: Optional[set] = None) -> bool:
     """True when the captured tokens can plausibly be a person's name.
 
-    Rejects empty captures, over-long captures, absurdly long "words", and any
-    capture containing a known non-name token.
+    Accepts a capture that either looks like a name (bounded length, no
+    non-name token, no verb ending) **or** is corroborated by a known name
+    list (the registry identities or the NER output). Everything else is
+    discarded rather than emitted as a speaker label.
     """
     if not tokens or len(tokens) > _MAX_NAME_WORDS:
         return False
-    return all(len(t) <= 15 and t not in _NON_NAME_WORDS for t in tokens)
+    if known_names and " ".join(tokens) in known_names:
+        return True
+    for t in tokens:
+        if len(t) > 15 or t in _NON_NAME_WORDS:
+            return False
+        if t.endswith(_VERB_SUFFIXES):
+            return False
+    return True
 
 #: NER window size in characters. TokenClassificationPipeline truncates to the
 #: tokenizer's model_max_length (512 subwords) WITHOUT warning, so a 120-second
@@ -75,12 +92,18 @@ def _plausible_name(tokens: List[str]) -> bool:
 _NER_WINDOW_CHARS = 1200
 
 
-def extract_anchor_names_from_text(text: str) -> List[str]:
+def extract_anchor_names_from_text(text: str,
+                                   known_names: Optional[set] = None) -> List[str]:
     """Extract candidate self-introduced names from 'আমি <Name>' patterns.
 
     Shared by engines/fusion.py (identity resolution) and
     extract_intro_anchor below. Returns one cleaned name per anchor hit,
     in order of appearance.
+
+    Args:
+        known_names: corroborated names (registry identities and/or the NER
+            output). A capture matching one of these is accepted even when it
+            would fail the name-likeness heuristics.
     """
     names: List[str] = []
     for m in _HOST_ANCHOR_RE.finditer(text or ""):
@@ -94,7 +117,7 @@ def extract_anchor_names_from_text(text: str) -> List[str]:
             trimmed.append(w)
             if len(trimmed) >= _MAX_NAME_WORDS:
                 break
-        if _plausible_name(trimmed):
+        if _plausible_name(trimmed, known_names):
             names.append(" ".join(trimmed))
     return names
 

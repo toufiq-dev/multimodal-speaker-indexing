@@ -78,18 +78,25 @@ def _face(t, name, conf, runner=0.0):
                           runner_up_confidence=runner)
 
 
-def test_ambiguous_face_is_not_named():
-    # top-1 leads the runner-up by 0.02, below FACE_SIM_MARGIN (0.05):
-    # two enrolled people look alike, so no name may be asserted.
+def test_ambiguous_face_is_not_named(monkeypatch):
+    # top-1 leads the runner-up by 0.02, below the margin: two enrolled people
+    # look alike, so no name may be asserted. The gates ship disabled (they
+    # must be calibrated from fusion_diagnostics.json), hence enabling here.
+    from config import config
+    monkeypatch.setattr(config, "FACE_SIM_MARGIN", 0.05)
+
     f = _face(40.0, "Nahid", 0.80, runner=0.78)
     trans = [_seg(35, 55, "SPEAKER_01", "কিছু কথা")]
     resolved = GatingFusion().resolve_identities(DIA, trans, [f])
     assert resolved["SPEAKER_01"][0] != "Nahid"
 
 
-def test_low_presence_identity_is_rejected():
+def test_low_presence_identity_is_rejected(monkeypatch):
     # Only 1 of 4 faces in the turn is the registry match (25% < 40%):
     # a fleeting appearance must not name the whole speaker.
+    from config import config
+    monkeypatch.setattr(config, "FACE_MIN_FRAME_FRACTION", 0.4)
+
     faces = [_face(31.0, "Nahid", 0.85)]
     faces += [_face(35.0 + i, "UNKNOWN", 0.0) for i in range(3)]
     trans = [_seg(35, 55, "SPEAKER_01", "কিছু কথা")]
@@ -106,3 +113,39 @@ def test_dominant_identity_names_the_speaker_with_mean_confidence():
     resolved = GatingFusion().resolve_identities(DIA, trans, faces)
     assert resolved["SPEAKER_01"][0] == "Nahid"
     assert resolved["SPEAKER_01"][1] == 0.82
+
+
+def test_uncorroborated_anchor_is_not_a_speaker_label():
+    """An unvalidated 'আমি <clause>' must never become a speaker name.
+
+    Regression: the v2 RTV run labelled speakers 'গিয়েছি তদ্বির করতে',
+    'বলে দিচ্ছি' and 'যখন' because the greedy anchor capture was emitted
+    without any check that it was a person's name.
+    """
+    trans = [
+        _seg(35, 55, "SPEAKER_01", "আমি গিয়েছি তদ্বির করতে"),
+        _seg(62, 80, "SPEAKER_02", "আমি বলে দিচ্ছি"),
+    ]
+    resolved = GatingFusion().resolve_identities(DIA, trans, [])
+    names = [v[0] for v in resolved.values()]
+    for bad in ("গিয়েছি তদ্বির করতে", "বলে দিচ্ছি", "যখন", "তদ্বির"):
+        assert bad not in names, f"{bad!r} leaked into the speaker labels"
+    assert any(n.startswith("Speaker_") for n in names)
+
+
+def test_registry_diagnostics_reports_gaps_and_presence():
+    """The calibration data must expose margin and presence per speaker."""
+    faces = [_face(32.0 + i, "Nahid", 0.80 + i * 0.01, runner=0.70)
+             for i in range(2)]
+    faces.append(_face(50.0, "UNKNOWN", 0.0))
+
+    fusion = GatingFusion()
+    speaker_faces = fusion._aggregate_faces_per_speaker(DIA, faces)
+    diag = fusion.registry_face_diagnostics(speaker_faces)
+
+    d = diag["SPEAKER_01"]
+    assert d["n_faces"] == 3
+    assert d["votes"] == {"Nahid": 2}
+    assert d["winner"] == "Nahid"
+    assert d["winner_presence"] == round(2 / 3, 3)
+    assert d["best_margin"] == round(0.81 - 0.70, 3)
