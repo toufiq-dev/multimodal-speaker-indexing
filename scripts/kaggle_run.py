@@ -88,10 +88,10 @@ def export_cudnn_path() -> str | None:
     """
     try:
         from runtime import cudnn_library_dir
+        lib = cudnn_library_dir()
     except Exception as exc:
         print("cudnn path   : ERROR", exc)
         return None
-    lib = cudnn_library_dir()
     if not lib:
         print("cudnn path   : not found in the torch wheel")
         return None
@@ -167,6 +167,22 @@ def main() -> int:
     if args.report_only:
         summarize(out_dir)
         return 0
+
+    # A fresh Kaggle session has none of the pinned dependencies (and ships a
+    # NumPy that breaks the vision stack). bootstrap() is idempotent: it either
+    # installs what is missing and asks for a restart, or completes quietly.
+    # Check first so this runner gives that instruction instead of dying on an
+    # unrelated import half-way through the pipeline.
+    import numpy as _np
+    from runtime import NUMPY_ABI_LOCK
+    missing = ks._missing_deps()
+    if missing or not _np.__version__.startswith(NUMPY_ABI_LOCK):
+        print(f"environment not ready: numpy={_np.__version__}, missing={missing}")
+        print("Running kaggle_setup.bootstrap() (idempotent)...\n")
+        ks.bootstrap()
+        print("\nIf bootstrap asked for a restart: Runtime -> Restart session, "
+              "re-run this same command, and it will proceed.")
+        return 2
 
     report()
     export_cudnn_path()

@@ -100,7 +100,13 @@ def cudnn_library_dir() -> Optional[str]:
         import nvidia.cudnn  # type: ignore
     except Exception:
         return None
-    lib = os.path.join(os.path.dirname(nvidia.cudnn.__file__), "lib")
+    # A namespace package (a partial or absent nvidia install) has no
+    # __file__; os.path.dirname(None) raises TypeError, which is not the
+    # useful answer here — "no cuDNN directory" is.
+    pkg_file = getattr(nvidia.cudnn, "__file__", None)
+    if not pkg_file:
+        return None
+    lib = os.path.join(os.path.dirname(pkg_file), "lib")
     return lib if os.path.isdir(lib) else None
 
 

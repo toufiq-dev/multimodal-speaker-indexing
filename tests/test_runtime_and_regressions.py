@@ -562,3 +562,36 @@ def test_kaggle_run_exports_cudnn_path_for_children(monkeypatch):
 
     assert mod.export_cudnn_path() == "/opt/fake/cudnn2"
     assert _os.environ["LD_LIBRARY_PATH"] == "/opt/fake/cudnn2"
+
+
+def test_cudnn_library_dir_handles_a_namespace_package(monkeypatch):
+    """A partial nvidia install has no __file__; that must be None, not a crash.
+
+    os.path.dirname(None) raised TypeError and aborted the whole runner on a
+    fresh Kaggle session before any useful work happened.
+    """
+    import sys as _sys
+    import types
+    import runtime
+
+    fake_nvidia = types.ModuleType("nvidia")
+    fake_cudnn = types.ModuleType("nvidia.cudnn")     # deliberately no __file__
+    fake_nvidia.cudnn = fake_cudnn
+    monkeypatch.setitem(_sys.modules, "nvidia", fake_nvidia)
+    monkeypatch.setitem(_sys.modules, "nvidia.cudnn", fake_cudnn)
+
+    assert runtime.cudnn_library_dir() is None
+
+
+def test_kaggle_run_bootstraps_when_the_environment_is_not_ready(monkeypatch):
+    """On a fresh session the runner must bootstrap, not die mid-pipeline."""
+    import kaggle_setup as ks
+
+    mod = _load_script("kaggle_run")
+    calls: list = []
+    monkeypatch.setattr(ks, "_missing_deps", lambda: ["torch"])
+    monkeypatch.setattr(ks, "bootstrap", lambda: calls.append("bootstrap"))
+    monkeypatch.setattr(sys, "argv", ["kaggle_run.py", "--id", "x"])
+
+    assert mod.main() == 2
+    assert calls == ["bootstrap"]
