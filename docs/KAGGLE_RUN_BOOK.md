@@ -383,3 +383,48 @@ When a cell errors, paste me:
 Do **not** edit code blindly — many failures are environment/version issues the
 preflight is designed to catch, and the fix is usually in the setup, not the
 pipeline.
+
+---
+
+## 5. Recovery: `RecursionError` in `convert_asr_model()` (NumPy mismatch)
+
+**Symptom:** `import kaggle_setup` crashes with
+`RecursionError: maximum recursion depth exceeded` inside
+`numpy/_core/...` → `faster_whisper/feature_extractor.py`.
+
+**Cause:** the Kaggle base image ships **NumPy 2.x**, and the running kernel
+imported it *before* `pip install numpy==1.26.4` downgraded the file on disk.
+Pip changes disk, but Python keeps the already-imported module in `sys.modules`,
+so `faster_whisper`'s Mel-filterbank math runs on the wrong NumPy and recurses
+inside NumPy's dtype `repr`. The repo pins NumPy 1.26.x for the
+`insightface`/`onnxruntime` ABI.
+
+**Fix — restart the kernel, then resume without reinstalling:**
+
+1. Kaggle menu: **Run → Restart session** (or the ⟳ button).
+2. Run this cell (packages are already on disk, so this is cheap):
+
+```python
+import os, sys
+repo = "/kaggle/working/multimodal-speaker-indexing"
+os.chdir(repo); sys.path.insert(0, repo)
+
+# numpy must be 1.26.x in the *restarted* process
+import numpy; print("numpy in memory:", numpy.__version__)
+assert numpy.__version__.startswith("1.26"), \
+    "run: !pip install numpy==1.26.4  then restart again"
+
+# Import without triggering the full ~20-min auto-setup, then finish it.
+_saved = os.environ.pop("KAGGLE_KERNEL_RUN_TYPE", None)
+import kaggle_setup as ks
+if _saved:
+    os.environ["KAGGLE_KERNEL_RUN_TYPE"] = _saved
+
+ks.finish_setup()   # convert CT2 -> preflight -> verify imports -> verify registry
+```
+
+3. If the assert says NumPy is still 2.x, run `!pip install numpy==1.26.4` and
+   **restart again**, then re-run the cell.
+
+`convert_asr_model()` now asserts the ABI itself, so any recurrence raises a
+clear "restart the kernel" message instead of a RecursionError.
