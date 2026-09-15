@@ -59,6 +59,18 @@ def test_speaking_track_is_none_without_tracks():
     assert speaking_track([_face(0, -1, 5.0)]) is None
 
 
+def test_speaking_track_ignores_a_briefly_visible_mover():
+    """Presence must exclude a background face that only flickers into shot.
+
+    The camera frames the speaker for most of a turn. Without a presence
+    requirement, a two-frame background face that jitters outranks them — which
+    is how the v6 run named turns after a silent panellist.
+    """
+    faces = ([_face(i * 0.1, 1, 0.02) for i in range(10)]
+             + [_face(i * 0.1, 2, 0.40) for i in range(2)])
+    assert speaking_track(faces, min_presence=0.30) == 1
+
+
 # ── track identity ─────────────────────────────────────────────────────
 
 def test_track_identity_is_the_majority_with_mean_confidence():

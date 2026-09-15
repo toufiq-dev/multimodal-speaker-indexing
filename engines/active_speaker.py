@@ -39,18 +39,36 @@ def track_mean_motion(faces: List) -> float:
     return sum(motions) / len(motions) if motions else 0.0
 
 
-def speaking_track(faces: List, min_motion: float = 0.0) -> Optional[int]:
-    """Track id whose mouth moves most within a turn, or None.
+def speaking_track(faces: List, min_motion: float = 0.0,
+                   min_presence: float = 0.0) -> Optional[int]:
+    """Track id whose mouth moves most among the prominently visible faces.
 
-    ``min_motion`` gates the result: with the default 0.0 the most-moving track
-    is always accepted (there is always a most-moving face); raise it to
-    require actual articulation before trusting the selection.
+    ``min_presence`` is the fraction of the turn's tracked faces a track must
+    account for before it is even considered. Without it, a two-frame
+    background face that happens to jitter outranks the person the camera is
+    actually on: the v6 run named turns after "Zahed Ur Rahman" (a panellist
+    of a different programme, present in the frame but silent) and after the
+    host during Shahriar's turns for exactly that reason. The camera frames the
+    speaker for most of a turn, so motion should only choose *among* the
+    faces that actually occupy it.
+
+    ``min_motion`` then gates the winner: with 0.0 the most-moving eligible
+    track is always accepted; raise it to require real articulation.
     """
     tracks = group_by_track(faces)
     if not tracks:
         return None
+    total = sum(len(group) for group in tracks.values())
+    if total <= 0:
+        return None
+
+    eligible = {tid: group for tid, group in tracks.items()
+                if len(group) / total >= min_presence}
+    if not eligible:
+        return None
+
     best_tid, best_motion = None, None
-    for tid, group in tracks.items():
+    for tid, group in eligible.items():
         motion = track_mean_motion(group)
         if best_motion is None or motion > best_motion:
             best_tid, best_motion = tid, motion

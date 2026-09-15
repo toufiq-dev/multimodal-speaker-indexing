@@ -290,7 +290,8 @@ class GatingFusion:
             turn_faces = ordered_faces[lo:hi]
             if not turn_faces:
                 continue
-            tid = speaking_track(turn_faces, config.ASD_MIN_MOUTH_MOTION)
+            tid = speaking_track(turn_faces, config.ASD_MIN_MOUTH_MOTION,
+                                 config.ASD_MIN_TRACK_PRESENCE)
             if tid is None:
                 continue
             identity = track_identity(
@@ -370,6 +371,20 @@ class GatingFusion:
 
         # Pass 1: registry faces.
         reg = self._best_registry_face_per_speaker(speaker_faces)
+
+        # A per-turn override may deviate from the speaker's dominant identity
+        # only if that identity is established somewhere in the episode (it won
+        # at least one diarization speaker). Otherwise one well-matched frame of
+        # someone who never speaks could name a turn: v6 emitted "Zahed Ur
+        # Rahman" — a panellist of a different programme who is present in the
+        # shot but silent here — for exactly this reason.
+        if self.turn_identities and reg:
+            supported = {name for name, _ in reg.values()}
+            self.turn_identities = {
+                key: value for key, value in self.turn_identities.items()
+                if value[0] in supported
+            }
+
         for spk in speaker_ids:
             if spk in resolved:
                 continue

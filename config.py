@@ -135,6 +135,13 @@ class Config:
     # Minimum mean mouth motion for a track to count as "speaking". 0.0 accepts
     # the most-moving track unconditionally; raise it to require real motion.
     ASD_MIN_MOUTH_MOTION: float = 0.0
+    # Fraction of a turn's tracked faces a face track must account for before it
+    # may be chosen as the speaker. The camera frames the speaker for most of a
+    # turn; without this, a briefly visible background face that jitters can
+    # outrank them and name the turn (observed: a silent panellist from another
+    # programme, and the host over a co-panelist's turns).
+    ASD_MIN_TRACK_PRESENCE: float = field(
+        default_factory=lambda: _env_float("ASD_MIN_TRACK_PRESENCE", 0.30))
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3

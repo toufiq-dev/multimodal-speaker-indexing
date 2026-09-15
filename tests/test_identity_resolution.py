@@ -179,25 +179,34 @@ def _one_turn():
     return [DiarizationSegment(0.0, 30.0, "SPEAKER_00")]
 
 
-def test_turn_uses_the_speaking_track_not_the_best_matching_listener():
-    dia = _one_turn()
+def test_turn_uses_the_speaking_track_when_that_identity_is_supported():
+    """Motion decides the turn, provided the identity is established elsewhere.
+
+    A still listener outmatches the speaker within this turn, but the speaker's
+    identity is dominant for another diarization speaker, so the speaking track
+    may name the turn. (An identity that never wins any speaker is refused —
+    see test_identity_that_never_wins_a_speaker_cannot_name_a_turn.)
+    """
+    dia = [DiarizationSegment(0.0, 30.0, "SPEAKER_00"),
+           DiarizationSegment(30.0, 60.0, "SPEAKER_01")]
     faces = []
-    # A listener: 20 still frames, confidently matched to Shahriar.
-    for i in range(20):
+    for i in range(15):      # this turn: a still listener, matched confidently
         faces.append(_trackface(i * 0.5, track=1, motion=0.0,
-                                name="Shahriar", conf=0.78))
-    # The speaker: fewer frames, weaker similarity, but the mouth is moving.
-    for i in range(10):
+                                name="Shahriar", conf=0.70))
+    for i in range(10):      # this turn: the speaker, moving
         faces.append(_trackface(i * 0.5, track=2, motion=0.30,
+                                name="Tushar", conf=0.55))
+    for i in range(20):      # another speaker establishes Tushar
+        faces.append(_trackface(30.0 + i * 0.5, track=3, motion=0.0,
                                 name="Tushar", conf=0.60))
 
     fusion = GatingFusion()
     resolved = fusion.resolve_identities(dia, [], faces)
     finals = fusion.create_final_segments(
-        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
-
-    assert finals[0].speaker == "Tushar"
-    assert finals[0].confidence == 0.6
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা"),
+              _seg(30, 60, "SPEAKER_01", "আরও কথা")], resolved)
+    by_start = {round(f.start, 1): f.speaker for f in finals}
+    assert by_start[0.0] == "Tushar"
 
 
 def test_without_track_information_the_speaker_label_is_used():
@@ -224,3 +233,49 @@ def test_speaking_track_without_a_registry_identity_falls_back():
     finals = fusion.create_final_segments(
         dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
     assert finals[0].speaker == "Shahriar"
+
+
+def test_background_mover_does_not_name_the_turn():
+    """A briefly visible face that matches someone else must not name a turn.
+
+    v6 labelled turns after "Zahed Ur Rahman" — a panellist of another
+    programme, present in the shot but silent — because his track moved more
+    than the far more prominent speaker's.
+    """
+    dia = _one_turn()
+    faces = []
+    for i in range(30):                      # the speaker, on screen throughout
+        faces.append(_trackface(i * 0.5, track=1, motion=0.02,
+                                name="Tushar", conf=0.55))
+    for i in range(5):                       # a background face, briefly
+        faces.append(_trackface(i * 0.5, track=2, motion=0.40,
+                                name="Zahed", conf=0.58))
+
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+    assert finals[0].speaker == "Tushar"
+
+
+def test_identity_that_never_wins_a_speaker_cannot_name_a_turn():
+    """Global support gate: an identity absent everywhere else is not emitted.
+
+    Even with enough presence to be selected as the speaking track, an
+    identity that never wins any diarization speaker must not name a turn.
+    """
+    dia = _one_turn()
+    faces = []
+    for i in range(20):                      # dominant identity of this speaker
+        faces.append(_trackface(i * 0.5, track=1, motion=0.01,
+                                name="Tushar", conf=0.55))
+    for i in range(10):                      # enough presence, but unsupported
+        faces.append(_trackface(i * 0.5, track=2, motion=0.40,
+                                name="Zahed", conf=0.58))
+
+    fusion = GatingFusion()
+    resolved = fusion.resolve_identities(dia, [], faces)
+    assert "Zahed" not in {v[0] for v in resolved.values()}
+    finals = fusion.create_final_segments(
+        dia, [_seg(0, 30, "SPEAKER_00", "কিছু কথা")], resolved)
+    assert finals[0].speaker == "Tushar"
