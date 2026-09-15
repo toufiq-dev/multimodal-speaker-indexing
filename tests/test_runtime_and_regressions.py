@@ -520,3 +520,11 @@ def test_run_episode_rejects_a_missing_video(monkeypatch, tmp_path):
     mod = _load_script("run_episode")
     monkeypatch.setattr(sys, "argv", ["run_episode.py", str(tmp_path / "nope.mp4")])
     assert mod.main() == 2
+
+
+def test_kaggle_run_script_loads_and_is_safe_without_kaggle():
+    """kaggle_run.py must import cleanly and not scan /kaggle when told a path."""
+    mod = _load_script("kaggle_run")
+    for name in ("main", "find_video", "ensure_registry", "report"):
+        assert callable(getattr(mod, name)), f"kaggle_run.{name} missing"
+    assert mod.find_video("/definitely/not/here.mp4") is None
