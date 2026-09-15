@@ -203,3 +203,37 @@ see §7 for intermittent power).
   `bootstrap()` is idempotent and stops for a restart only when it must.
 - The runner writes per-video scratch, so re-running after a cut reuses the
   extracted media rather than starting from zero.
+
+---
+
+## 8. Active-speaker detection (the tracked high-FPS pass)
+
+Identity is attributed to the face whose **mouth is moving**, not to whichever
+visible face matches the registry best. In multi-camera footage a still,
+well-framed listener can match better than the speaker — on the RTV episode the
+speaker's face cleared the similarity threshold once in 616 detections while a
+silent co-panelist cleared it 55 times — so the old pooled vote named the
+speaker's turns after a non-speaker.
+
+How it works now:
+
+1. Frames are extracted at `VISION_ASD_FPS` (default **8**) instead of 1 FPS,
+   because mouth motion is meaningless across one-second gaps.
+2. `engines/vision.py` follows each face across frames (IoU) and measures the
+   mouth region against **that track's own** previous frame.
+3. Each track's mean embedding is matched to the registry, so a face that misses
+   the threshold frame-by-frame can still be named as a track.
+4. `engines/fusion.py` resolves identity **per turn**, from the track with the
+   most mouth motion (`engines/active_speaker.py`), rather than pooling every
+   face visible across all of a speaker's turns.
+
+Consequences to expect:
+
+- **More frames**: ~3.3k for a 6m49s clip (vs ~410 at 1 FPS), so vision takes a
+  little longer and the scratch cache key changes to `frames_8fps`.
+- **Frames are cached per rate**, so a rate change re-extracts rather than
+  reusing mismatched frames.
+- Override the rate with `--vision-fps N` on `scripts/run_episode.py`.
+
+Settings that matter for calibration: `ASD_MIN_MOUTH_MOTION` (0.0 accepts the
+most-moving track unconditionally) and `ASD_TRACK_IOU` (0.3).
