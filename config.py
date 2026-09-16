@@ -166,6 +166,30 @@ class Config:
     # text in silence).
     WHISPER_VAD_FILTER: bool = field(
         default_factory=lambda: os.getenv("WHISPER_VAD_FILTER", "1") == "1")
+    # Decode knobs for the ASR-recall ablation (P1). Every default below
+    # reproduces faster-whisper's own default, so leaving them unset keeps the
+    # v9 decode bit-for-bit; they exist to be swept and measured, not tuned by
+    # eye. See scripts/ablate_asr.py and data/gt/rtv_goll_table/README.md.
+    #
+    # condition_on_previous_text feeds each window's text back as the next
+    # window's prompt. It is the standard cause of Whisper's degenerate
+    # repetition loops, and v9 cues 85-90 are exactly such a loop (the same
+    # clause re-emitted five times), which the annotator had to rewrite by
+    # hand. Set WHISPER_CONDITION_ON_PREV=0 to break the feedback path.
+    WHISPER_CONDITION_ON_PREV: bool = field(
+        default_factory=lambda: os.getenv("WHISPER_CONDITION_ON_PREV", "1") == "1")
+    WHISPER_BEAM_SIZE: int = field(
+        default_factory=lambda: int(os.getenv("WHISPER_BEAM_SIZE", "5")))
+    # Raising the compression-ratio threshold makes the decoder tolerate more
+    # repetition before discarding a window; lowering it discards sooner.
+    WHISPER_COMPRESSION_RATIO_THRESHOLD: float = field(
+        default_factory=lambda: float(
+            os.getenv("WHISPER_COMPRESSION_RATIO_THRESHOLD", "2.4")))
+    # Lowering no_speech_threshold keeps quiet/overlapped windows that would
+    # otherwise be dropped as silence -- the other half of the missing-words
+    # problem that WHISPER_VAD_FILTER addresses.
+    WHISPER_NO_SPEECH_THRESHOLD: float = field(
+        default_factory=lambda: float(os.getenv("WHISPER_NO_SPEECH_THRESHOLD", "0.6")))
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3

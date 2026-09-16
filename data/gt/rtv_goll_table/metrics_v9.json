@@ -44,6 +44,17 @@
     "hyp_words": 924,
     "word_recall_proxy": 0.8163
   },
+  "repetition": {
+    "_definition": "share of duplicated 5-grams; reference text scores 0.0044",
+    "hypothesis": {
+      "ngram_repeat_ratio": 0.0641,
+      "n_ngrams": 920
+    },
+    "reference": {
+      "ngram_repeat_ratio": 0.0044,
+      "n_ngrams": 1128
+    }
+  },
   "label_inventory": {
     "Dr Md Tawohidul Haque": 11,
     "Dr Abdul Noor Tushar": 59,

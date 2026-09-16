@@ -167,6 +167,10 @@ def transcribe_audio(
         word_timestamps=True,
         vad_filter=config.WHISPER_VAD_FILTER,
         language="bn",
+        beam_size=config.WHISPER_BEAM_SIZE,
+        condition_on_previous_text=config.WHISPER_CONDITION_ON_PREV,
+        compression_ratio_threshold=config.WHISPER_COMPRESSION_RATIO_THRESHOLD,
+        no_speech_threshold=config.WHISPER_NO_SPEECH_THRESHOLD,
     )
 
     print(f"[transcription] language={info.language} "

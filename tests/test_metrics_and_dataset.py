@@ -1,6 +1,8 @@
 """Tests for evaluation metrics and dataset management."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 
 import pytest
@@ -108,3 +110,30 @@ def test_speaker_name_accuracy_no_double_count_on_overlap():
     acc = speaker_name_accuracy(ref, finals)
     assert acc == pytest.approx(0.9)            # union 0-9 of 10s, not 2.1
     assert acc <= 1.0
+
+
+def test_ngram_repetition_separates_looping_from_healthy_text():
+    from evaluation.metrics import ngram_repetition
+    healthy = " ".join(f"w{i}" for i in range(60))
+    assert ngram_repetition(healthy)["ngram_repeat_ratio"] == 0.0
+    looped = ("the same clause over again " * 12)
+    assert ngram_repetition(looped)["ngram_repeat_ratio"] > 0.7
+    assert ngram_repetition("too short")["n_ngrams"] == 0
+
+
+def test_ablation_summary_renders_without_crashing(capsys):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "ablate_asr", Path(__file__).resolve().parents[1] / "scripts" / "ablate_asr.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rows = [
+        {"name": "baseline_v9", "wer": 0.3675, "cer": 0.31, "hyp_words": 924,
+         "word_recall_proxy": 0.816, "ngram_repeat_ratio": 0.064, "elapsed_sec": 91.2},
+        {"name": "novad", "wer": 0.31, "cer": 0.27, "hyp_words": 1090,
+         "word_recall_proxy": 0.963, "ngram_repeat_ratio": 0.071, "elapsed_sec": 120.4},
+        {"name": "fp16", "error": "conversion blew up"},
+    ]
+    mod.print_summary(rows)
+    out = capsys.readouterr().out
+    assert "baseline_v9" in out and "-0.0575" in out and "FAILED" in out

@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 from evaluation.metrics import (_edit_distance, _normalize_words, _norm_chars,
-                                cpwer, der_jer, speaker_name_accuracy)
+                                cpwer, der_jer, ngram_repetition,
+                                speaker_name_accuracy)
 from evaluation.normalize_gt import CANONICAL, GT_DIR, V9_SRT, _parse_srt_tolerant, \
     _split_speaker, _canonicalise
 from models import DiarizationSegment, FinalSegment
@@ -139,6 +140,12 @@ def score(hyp_segs: List[FinalSegment], tag: str) -> Dict[str, object]:
         "hyp_words": len(_normalize_words(hyp_all)),
         "word_recall_proxy": round(
             len(_normalize_words(hyp_all)) / len(_normalize_words(ref_all)), 4),
+    }
+    # Decoder looping, the failure that forced hand-rewriting of 360-387 s.
+    rep["repetition"] = {
+        "_definition": "share of duplicated 5-grams; reference text scores 0.0044",
+        "hypothesis": ngram_repetition(hyp_all),
+        "reference": ngram_repetition(ref_all),
     }
     rep["label_inventory"] = dict(Counter(s.speaker for s in hyp_segs))
     rep["spurious_labels"] = sorted(

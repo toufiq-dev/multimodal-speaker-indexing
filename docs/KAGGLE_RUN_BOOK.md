@@ -237,3 +237,79 @@ Consequences to expect:
 
 Settings that matter for calibration: `ASD_MIN_MOUTH_MOTION` (0.0 accepts the
 most-moving track unconditionally) and `ASD_TRACK_IOU` (0.3).
+
+---
+
+## P1 — ASR recall ablation (measured, not tuned)
+
+The benchmark in `data/gt/rtv_goll_table/` makes ASR changes measurable. The v9
+baseline to beat, from `metrics_v9.json`:
+
+| metric | v9 |
+|---|---|
+| WER / CER (lower bounds) | 0.3675 / 0.3128 |
+| words produced | 924 of 1132 = **81.6 %** |
+| 5-gram repeat ratio | **0.0641** (reference text: 0.0044) |
+| repeat ratio, 360–387 s | **0.4041** (reference: 0.0404) |
+
+Two distinct ASR faults are visible in that row: **18 % of words never appear**,
+and the decoder **loops**, re-emitting the same clause — v9 cues 85–90 are one
+clause repeated five times, which the annotator had to rewrite by hand.
+
+### Step 1 — sweep the decode, ASR only (~10 min on T4)
+
+Runs Whisper alone, no diarization/vision/fusion, so any WER move is
+attributable to the decode change:
+
+```bash
+!cd /kaggle/working/multimodal-speaker-indexing && git pull -q && \
+    python scripts/ablate_asr.py --video /kaggle/input/<your-dataset>/rtv_goll_table.mp4
+```
+
+Six configs, each changing one thing against `baseline_v9`:
+
+| config | targets |
+|---|---|
+| `baseline_v9` | reproduces the v9 decode exactly — sanity anchor |
+| `novad` | `WHISPER_VAD_FILTER=0`; VAD discarding quiet/overlapped speech |
+| `nocond` | `condition_on_previous_text=False`; the repetition loop |
+| `novad_nocond` | both |
+| `fp16` | CT2 float16 instead of int8 |
+| `fp16_novad_nocond` | all three |
+
+It prints a table with ΔWER against the baseline and writes
+`data/gt/rtv_goll_table/asr_ablation/results.json` plus each config's raw
+transcript. Add `--only novad nocond` to run a subset.
+
+**`baseline_v9` must land near WER 0.3675.** If it does not, the environment
+differs from the v9 run and no other row in the table can be trusted yet.
+
+Read `rep` (5-gram repeat ratio) alongside WER: a loop can *replace* real
+content rather than add to it, so it can worsen the transcript without moving
+WER much. Watch `recall` for VAD-off hallucination too — if `recall` overshoots
+1.0 while WER rises, the decoder is inventing text in silence.
+
+### Step 2 — full pipeline on the winner, then score
+
+Set the winning knobs as env vars, run the pipeline, and score against the
+benchmark:
+
+```bash
+!cd /kaggle/working/multimodal-speaker-indexing && \
+    WHISPER_VAD_FILTER=0 WHISPER_CONDITION_ON_PREV=0 \
+    python scripts/kaggle_run.py --id rtv_goll_table_ep_v10
+
+!cd /kaggle/working/multimodal-speaker-indexing && \
+    python -m evaluation.score_run \
+        --hyp /kaggle/working/output/rtv_goll_table_ep_v10/subtitles.srt \
+        --tag v10 --compare data/gt/rtv_goll_table/metrics_v9.json
+```
+
+`score_run.py` is time-based and assumes nothing about cue alignment, so it
+grades a run whose segmentation differs from v9's. It prints a `delta` block
+against the comparison file. The primary number is
+`speaker_name_accuracy.reliable_uem` (v9: **0.8899**), with
+`overlapping_turns` (v9: **0.7803**) as the first-class target.
+
+Every decode knob defaults to faster-whisper's own default, so an unset
+environment reproduces v9 exactly. Change them only via the ablation.

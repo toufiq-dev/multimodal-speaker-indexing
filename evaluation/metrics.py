@@ -87,6 +87,27 @@ def _norm_chars(text: str) -> List[str]:
 # ----------------------------------------------------------------------
 # Joint ASR+diarization metrics
 # ----------------------------------------------------------------------
+def ngram_repetition(text: str, n: int = 5) -> Dict[str, float]:
+    """Quantify degenerate decoder looping.
+
+    Whisper's repetition loops re-emit the same clause, so the share of
+    duplicated n-grams separates a looping decode from healthy speech far more
+    sharply than WER does (WER charges a loop once per inserted word, but a
+    loop can also *replace* real content, which WER cannot distinguish).
+
+    Measured on this benchmark: reference text 0.004, v9 output 0.064, and
+    0.404 inside v9's 360-387 s loop where the annotator had to rewrite the
+    transcript by hand.
+    """
+    words = _normalize_words(text)
+    if len(words) < n:
+        return {"ngram_repeat_ratio": 0.0, "n_ngrams": 0}
+    grams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
+    uniq = len(set(grams))
+    return {"ngram_repeat_ratio": round(1.0 - uniq / len(grams), 4),
+            "n_ngrams": len(grams)}
+
+
 def cpwer(
     reference_by_speaker: Dict[str, str],
     hypothesis_by_speaker: Dict[str, str],

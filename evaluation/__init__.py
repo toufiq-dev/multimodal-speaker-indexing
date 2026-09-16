@@ -15,6 +15,7 @@ from evaluation.metrics import (
     wder,
     der_jer,
     speaker_name_accuracy,
+    ngram_repetition,
     face_attribution_accuracy,
     fusion_health_metrics,
 )
@@ -22,6 +23,6 @@ from evaluation.dataset import load_manifest, GroundTruth
 
 __all__ = [
     "wer", "cer", "cpwer", "wder", "der_jer",
-    "speaker_name_accuracy", "face_attribution_accuracy",
+    "speaker_name_accuracy", "face_attribution_accuracy", "ngram_repetition",
     "fusion_health_metrics", "load_manifest", "GroundTruth",
 ]
