@@ -1,0 +1,160 @@
+{
+  "tag": "v11",
+  "n_hyp_segments": 67,
+  "scoring_region_sec": 261.51,
+  "scoring_region_pct": 63.9,
+  "_primary_metric": "coverage_matched_accuracy.reliable_uem.accuracy",
+  "_primary_metric_note": "C1: raw speaker_name_accuracy is time-weighted over every reference turn, so a run that transcribes fewer words scores lower with identical identity logic (v9 924 words 0.8899 vs v10 866 words 0.8777, same config). Never compare raw accuracy across runs with different word counts.",
+  "speaker_name_accuracy": {
+    "reliable_uem": 0.6594,
+    "overlapping_turns": 0.4706,
+    "non_overlapping_turns": 0.7942,
+    "n_overlapping": 21,
+    "n_non_overlapping": 49,
+    "per_speaker": {
+      "Dr Abdul Noor Tushar": 0.7802,
+      "Barrister A S M Shahriar Kabir": 0.5404,
+      "Dr Md Tawohidul Haque": 0.3725
+    },
+    "all_turns_incl_unreliable": 0.5669
+  },
+  "coverage_matched_accuracy": {
+    "_definition": "speaker-name accuracy over reference turns overlapped by at least one text-bearing hypothesis cue; report this beside raw accuracy, never instead of it",
+    "reliable_uem": {
+      "accuracy": 0.7544,
+      "n_turns_covered": 56,
+      "n_turns_total": 70,
+      "n_turns_dropped": 14,
+      "covered_sec": 240.16,
+      "total_sec": 274.74,
+      "turn_coverage": 0.8741
+    },
+    "overlapping_turns": {
+      "accuracy": 0.4864,
+      "n_turns_covered": 20,
+      "n_turns_total": 21,
+      "n_turns_dropped": 1,
+      "covered_sec": 110.72,
+      "total_sec": 114.43,
+      "turn_coverage": 0.9676
+    },
+    "non_overlapping_turns": {
+      "accuracy": 0.9836,
+      "n_turns_covered": 36,
+      "n_turns_total": 49,
+      "n_turns_dropped": 13,
+      "covered_sec": 129.44,
+      "total_sec": 160.31,
+      "turn_coverage": 0.8075
+    },
+    "per_speaker": {
+      "Dr Abdul Noor Tushar": {
+        "accuracy": 0.8822,
+        "n_turns_covered": 37,
+        "n_turns_total": 46,
+        "n_turns_dropped": 9,
+        "covered_sec": 147.79,
+        "total_sec": 167.11,
+        "turn_coverage": 0.8844
+      },
+      "Barrister A S M Shahriar Kabir": {
+        "accuracy": 0.587,
+        "n_turns_covered": 12,
+        "n_turns_total": 14,
+        "n_turns_dropped": 2,
+        "covered_sec": 58.71,
+        "total_sec": 63.77,
+        "turn_coverage": 0.9206
+      },
+      "Dr Md Tawohidul Haque": {
+        "accuracy": 0.4852,
+        "n_turns_covered": 7,
+        "n_turns_total": 10,
+        "n_turns_dropped": 3,
+        "covered_sec": 33.67,
+        "total_sec": 43.86,
+        "turn_coverage": 0.7676
+      }
+    }
+  },
+  "attributed_time_accuracy": {
+    "_definition": "of the reference time the hypothesis spoke over, the share named correctly; denominator is hypothesised time, so word coverage cannot move it",
+    "reliable_uem": {
+      "accuracy": 0.8439,
+      "hypothesised_sec": 214.68,
+      "correct_sec": 181.17
+    },
+    "overlapping_turns": {
+      "accuracy": 0.6318,
+      "hypothesised_sec": 85.24,
+      "correct_sec": 53.85
+    },
+    "non_overlapping_turns": {
+      "accuracy": 0.9836,
+      "hypothesised_sec": 129.44,
+      "correct_sec": 127.32
+    }
+  },
+  "der_jer": {
+    "_warning": "reference boundaries are v9's own, so this reflects speaker confusion far more than boundary quality",
+    "uem_collar_0.25": {
+      "DER": 0.3503,
+      "JER": 0.4691,
+      "false_alarm": 0.0021,
+      "missed_detection": 0.2236,
+      "confusion": 0.1246
+    },
+    "uem_collar_0.0": {
+      "DER": 0.3534,
+      "JER": 0.4683,
+      "false_alarm": 0.0,
+      "missed_detection": 0.2228,
+      "confusion": 0.1307
+    }
+  },
+  "asr": {
+    "_warning": "LOWER BOUND: the annotation was edited from v9's own text",
+    "corpus_wer": 0.8604,
+    "corpus_cer": 0.7145,
+    "cpwer": 0.8887,
+    "cpwer_permutations": 24,
+    "gt_words": 1132,
+    "hyp_words": 525,
+    "word_recall_proxy": 0.4638,
+    "word_recall": 0.174,
+    "matched_words": 197
+  },
+  "repetition": {
+    "_definition": "share of duplicated 5-grams; reference text scores 0.0044",
+    "hypothesis": {
+      "ngram_repeat_ratio": 0.0422,
+      "n_ngrams": 521
+    },
+    "reference": {
+      "ngram_repeat_ratio": 0.0044,
+      "n_ngrams": 1128
+    }
+  },
+  "label_inventory": {
+    "Dr Md Tawohidul Haque": 10,
+    "Dr Abdul Noor Tushar": 46,
+    "Barrister A S M Shahriar Kabir": 9,
+    "face_cluster_3": 2
+  },
+  "spurious_labels": [
+    "face_cluster_3"
+  ],
+  "delta_vs": "v9_c1",
+  "delta": {
+    "coverage_matched.reliable_uem": -0.1355,
+    "coverage_matched.overlapping": -0.2939,
+    "attributed_time.reliable_uem": -0.046,
+    "raw_accuracy.reliable_uem": -0.2305,
+    "raw_accuracy.overlapping": -0.3097,
+    "word_recall": -0.5133,
+    "word_count_ratio": -0.3525,
+    "corpus_wer": 0.4929,
+    "ngram_repeat_ratio": -0.0219,
+    "DER": 0.2145
+  }
+}

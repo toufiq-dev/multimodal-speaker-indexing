@@ -68,17 +68,33 @@ demonstrated** — it needs the measurement below.
 
 | run id | config | cov-matched | raw | attr-time | word recall | count ratio | WER | repeat | overlap / non-overlap (raw) |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---|
-| `v9` | default decode | 0.8899 | 0.8899 | 0.8899 | 0.6873 | 0.8163 | 0.3675 | 0.0641 | 0.7803 / 0.9682 |
-| `v10` | same as v9 | — | 0.8777 | — | — | 0.7650 | 0.3436 | 0.0000 | 0.7710 / 0.9538 |
+| `v9_c1` | default decode | 0.8899 | 0.8899 | 0.8899 | 0.6873 | 0.8163 | 0.3675 | 0.0641 | 0.7803 / 0.9682 |
+| `v10_c1` | same as v9 | 0.8851 | 0.8777 | 0.8851 | 0.6643 | 0.7650 | 0.3436 | 0.0000 | 0.7710 / 0.9538 |
 
 v9's three accuracies coincide because the annotation was edited from v9's own
 subtitles: its cues tile the reference exactly, so coverage is 70/70 turns and
 274.7/274.7 s. The metrics only separate on runs that are not v9.
 
-**v10 cannot be re-scored.** Only `metrics_v10.json` survives; its
-`subtitles.srt` was not kept, so v10's coverage-matched, attributed-time and
-aligned-recall cells are permanently blank. Every future run must have its SRT
-archived beside its metrics JSON.
+**v10's SRT was recovered** and is archived as `v10_system.srt`; `v10_c1` is
+that file scored with the current scorer. Every future run must have its SRT
+archived beside its metrics JSON the same way.
+
+### C1 validated on the v9 -> v10 pair
+
+The two runs shared identical diarization and face evidence, so the whole gap
+is decode-driven. Decomposed:
+
+| subset | raw delta | coverage-matched delta |
+|---|---:|---:|
+| reliable UEM | **-0.0122** | **-0.0048** |
+| non-overlapping | **-0.0144** | **-0.0004** |
+| overlapping | -0.0093 | -0.0093 |
+
+**The non-overlapping "regression" was 97 % word coverage** — 0.0004 of identity
+change, reported for a year as 1.4 points. The overlapping delta is identical
+under both metrics, so *that* one is real: v10's 21 overlapping turns really
+were labelled 0.9 points worse. Reporting raw accuracy alone conflates the two
+and points the work at the wrong stage.
 
 ## Interventions
 
