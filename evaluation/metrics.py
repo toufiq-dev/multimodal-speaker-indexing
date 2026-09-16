@@ -277,6 +277,124 @@ def speaker_name_accuracy(
     return correct / total if total else 0.0
 
 
+def _merge(spans: List[Tuple[float, float]]) -> List[List[float]]:
+    """Union of intervals, as a sorted list of disjoint [start, end]."""
+    out: List[List[float]] = []
+    for s, e in sorted(spans):
+        if e - s <= 1e-9:
+            continue
+        if out and s <= out[-1][1]:
+            out[-1][1] = max(out[-1][1], e)
+        else:
+            out.append([s, e])
+    return out
+
+
+def _covered_span(turn: DiarizationSegment,
+                  final_segments: List[FinalSegment],
+                  speaker: str | None = None) -> List[List[float]]:
+    """Union of text-bearing hypothesis time inside `turn`.
+
+    `speaker=None` counts any cue that carries text; a speaker name counts only
+    cues attributed to that name. Empty-text cues never count: a cue with no
+    words is not an attribution, it is silence the system failed to transcribe.
+    """
+    return _merge([
+        (max(fs.start, turn.start), min(fs.end, turn.end))
+        for fs in final_segments
+        if fs.text and fs.text.strip()
+        and (speaker is None or fs.speaker == speaker)
+        and min(fs.end, turn.end) > max(fs.start, turn.start)
+    ])
+
+
+def coverage_matched_accuracy(
+    reference_turns: List[DiarizationSegment],
+    final_segments: List[FinalSegment],
+    min_overlap_sec: float = 0.0,
+) -> Dict[str, float]:
+    """Speaker-name accuracy restricted to reference turns the hypothesis
+    actually spoke over (constraint C1).
+
+    `speaker_name_accuracy` is time-weighted over every reference turn, so a
+    turn the decoder transcribed as nothing scores 0 while still counting in
+    the denominator. Two runs of the same identity logic then differ purely by
+    how many words the decoder emitted -- which is exactly what separated v9
+    (924 words, 0.8899) from v10 (866 words, 0.8777). Comparing raw accuracy
+    across runs with different word counts measures the decoder, not the
+    identity cascade.
+
+    Returns the accuracy over covered turns plus the coverage itself, so a
+    number can never be read without the denominator it was computed on.
+    """
+    covered, dropped = [], []
+    for turn in reference_turns:
+        got = sum(e - s for s, e in _covered_span(turn, final_segments))
+        (covered if got > min_overlap_sec else dropped).append(turn)
+    ref_sec = sum(t.end - t.start for t in reference_turns)
+    cov_sec = sum(t.end - t.start for t in covered)
+    return {
+        "accuracy": round(speaker_name_accuracy(covered, final_segments), 4)
+        if covered else None,
+        "n_turns_covered": len(covered),
+        "n_turns_total": len(reference_turns),
+        "n_turns_dropped": len(dropped),
+        "covered_sec": round(cov_sec, 2),
+        "total_sec": round(ref_sec, 2),
+        "turn_coverage": round(cov_sec / ref_sec, 4) if ref_sec else 0.0,
+    }
+
+
+def attributed_time_accuracy(
+    reference_turns: List[DiarizationSegment],
+    final_segments: List[FinalSegment],
+) -> Dict[str, float]:
+    """Of the reference time the hypothesis spoke over, the share it named
+    correctly. Fully decoupled from coverage: the denominator is hypothesised
+    time, not reference time, so emitting fewer words cannot move it.
+
+    Where coverage_matched_accuracy still charges the silent part of a partly
+    transcribed turn, this charges nothing the system did not claim. Read the
+    two together: coverage-matched is the honest headline, attributed-time
+    isolates the cascade.
+    """
+    spoken = correct = 0.0
+    for turn in reference_turns:
+        spoken += sum(e - s for s, e in _covered_span(turn, final_segments))
+        correct += sum(e - s for s, e in
+                       _covered_span(turn, final_segments, turn.speaker_id))
+    return {
+        "accuracy": round(correct / spoken, 4) if spoken else None,
+        "hypothesised_sec": round(spoken, 2),
+        "correct_sec": round(correct, 2),
+    }
+
+
+def word_recall(reference: str, hypothesis: str) -> Dict[str, float]:
+    """Share of reference words the hypothesis actually recovered, in order.
+
+    The count ratio len(hyp)/len(ref) that earlier reports called
+    "word_recall_proxy" rises when the decoder hallucinates or loops, so it
+    cannot separate recall from insertion. This aligns the two word sequences
+    (LCS over the normalised tokens) and counts matches, so a repetition loop
+    adds words without adding recall.
+    """
+    import difflib
+
+    ref, hyp = _normalize_words(reference), _normalize_words(hypothesis)
+    if not ref:
+        return {"word_recall": 0.0, "matched_words": 0, "gt_words": 0,
+                "hyp_words": len(hyp), "word_count_ratio": 0.0}
+    matched = sum(b.size for b in difflib.SequenceMatcher(
+        None, ref, hyp, autojunk=False).get_matching_blocks())
+    return {
+        "word_recall": round(matched / len(ref), 4),
+        "matched_words": matched,
+        "gt_words": len(ref),
+        "hyp_words": len(hyp),
+        "word_count_ratio": round(len(hyp) / len(ref), 4),
+    }
+
 def face_attribution_accuracy(
     reference_face_labels: List[Tuple[float, str]],    # (time, true_name)
     predicted_faces: List[Tuple[float, str]],

@@ -190,6 +190,16 @@ class Config:
     # problem that WHISPER_VAD_FILTER addresses.
     WHISPER_NO_SPEECH_THRESHOLD: float = field(
         default_factory=lambda: float(os.getenv("WHISPER_NO_SPEECH_THRESHOLD", "0.6")))
+    # Whisper's temperature fallback: when a window trips the compression-ratio
+    # or log-prob check, it is re-decoded by SAMPLING at rising temperatures
+    # (0.2 .. 1.0). That sampling is the only stochastic step in the decode, and
+    # it is the mechanism by which v9 and v10 -- same code, same config, same
+    # audio -- produced different word sets (C2). Set
+    # WHISPER_TEMPERATURE_FALLBACK=0 to decode greedily at temperature 0 only,
+    # trading recovery of hard windows for a reproducible transcript.
+    # Default 1 = faster-whisper's own default, so v9 is reproduced unchanged.
+    WHISPER_TEMPERATURE_FALLBACK: bool = field(
+        default_factory=lambda: os.getenv("WHISPER_TEMPERATURE_FALLBACK", "1") == "1")
     AUDIO_SR: int = 16000
     DBSCAN_EPS: float = 0.5
     DBSCAN_MIN_SAMPLES: int = 3

@@ -171,6 +171,10 @@ def transcribe_audio(
         condition_on_previous_text=config.WHISPER_CONDITION_ON_PREV,
         compression_ratio_threshold=config.WHISPER_COMPRESSION_RATIO_THRESHOLD,
         no_speech_threshold=config.WHISPER_NO_SPEECH_THRESHOLD,
+        # (0.0,) disables the sampling fallback entirely; the tuple below is
+        # faster-whisper's default, kept explicit so the ablation can switch it.
+        temperature=((0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+                     if config.WHISPER_TEMPERATURE_FALLBACK else (0.0,)),
     )
 
     print(f"[transcription] language={info.language} "
