@@ -137,6 +137,48 @@ def _assign_word_to_turn(
 
 
 
+def _merge_into_words(tokens) -> List[WordToken]:
+    """Rebuild whole words from faster-whisper's sub-word tokens.
+
+    faster-whisper reports word timestamps at token granularity, and the only
+    thing distinguishing a token that *starts* a word from one that continues
+    the previous word is a leading space. The old code did
+    ``word.word.strip()`` and then joined every token with ``" "``, which
+    destroys exactly that information: "শুরুর" became a cue beginning "ুরুর",
+    and "সত্যকে" became "সত ্যকে".
+
+    The damage is not only cosmetic. Speaker assignment runs per token, so the
+    two halves of one word could land in different diarization turns, putting
+    half a word under the wrong speaker.
+
+    So the marker is preserved, continuations are concatenated onto the
+    preceding word (extending its end time), and the merge happens here —
+    before any diarization is consulted — so a word is never divided between
+    two speakers.
+
+    If no token carries a leading space at all, the convention is absent
+    (a different tokenizer, or already-merged words) and merging would fuse the
+    whole stream into one word; in that case each token is kept as its own word.
+    """
+    toks = [t for t in tokens if t.word and t.word.strip()]
+    if not toks:
+        return []
+    if not any(t.word[:1].isspace() for t in toks):
+        return [WordToken(word=t.word.strip(), start=t.start, end=t.end)
+                for t in toks]
+
+    words: List[WordToken] = []
+    for token in toks:
+        text = token.word.strip()
+        if token.word[:1].isspace() or not words:
+            words.append(WordToken(word=text, start=token.start, end=token.end))
+        else:
+            previous = words[-1]
+            previous.word += text
+            previous.end = token.end
+    return words
+
+
 def transcribe_audio(
     audio_path: str,
     model: Optional[WhisperModel] = None,
@@ -185,14 +227,9 @@ def transcribe_audio(
 
     for segment in segments:
         full_text_parts.append(segment.text)
-        for word in segment.words or []:
-            words.append(
-                WordToken(
-                    word=word.word.strip(),
-                    start=word.start,
-                    end=word.end,
-                )
-            )
+        # Merge per segment: a new segment is a fresh utterance, so a token at
+        # its start begins a word even without a leading space.
+        words.extend(_merge_into_words(segment.words or []))
 
     full_text = " ".join(full_text_parts).strip()
 
