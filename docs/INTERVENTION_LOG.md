@@ -100,7 +100,58 @@ and points the work at the wrong stage.
 
 | run id | intervention | cov-matched | raw | attr-time | word recall | WER | repeat | overlap / non-overlap | command |
 |---|---|---|---|---|---|---|---|---|---|
-| _(none yet — Step 1 needs GPU)_ | | | | | | | | | |
+| v12 | word-merge fix (per-segment), default decode | 0.8359 | 0.8242 | 0.8359 | — | — | — | 0.6427 / 0.9772 | `kaggle_run.py --id rtv_goll_table_ep_v12` |
+| v13 | word-merge fix (per-segment), default decode | 0.8851 | 0.8777 | 0.8851 | 0.6458 | 0.3825 | 0.0185 | 0.7710 / 0.9678 | `kaggle_run.py --id rtv_goll_table_ep_v13` |
+
+## The noise floor, measured (v12 vs v13)
+
+Same code, same configuration, same decode, two runs:
+
+| | v12 | v13 | spread |
+|---|---:|---:|---:|
+| coverage-matched accuracy | 0.8359 | 0.8851 | **0.0492** |
+| overlapping subset | 0.6427 | 0.7710 | **0.1283** |
+| non-overlapping subset | 0.9772 | 0.9678 | 0.0094 |
+| Shahriar Kabir accuracy | 0.6473 | 0.8775 | **0.2302** |
+
+**This spread exceeds every delta measured so far, including v9→v10 (0.0122).**
+The overlapping subset — the primary target — is the noisiest number available.
+
+The spread is not diffuse. Comparing the two runs turn by turn on the
+ground-truth grid, they **agree on 85 of 89 turns**. Four disagree, and one of
+them dominates: 342.48–355.03 s (12.5 s), where v12 labels the host and v13
+labels Shahriar (the reference agrees with v13). In a 114.4 s overlapping
+subset, that single turn is ~11 % of the time — the 12.8-point swing is
+essentially one turn flipping.
+
+Cause is unfixed: the decode is stochastic (temperature fallback samples at
+rising temperature), so the word set differs, so per-turn decisions differ.
+Until the decode is seeded, no ASR or fusion intervention can be evaluated.
+Reproducibility is now the blocking step, ahead of VAD and overlap work.
+
+## Split-word artifacts: the per-segment merge did not work
+
+Measured on the real subtitles (scripts in the session scratchpad):
+
+| file | cues | cues starting with a combining mark | cues with a split fragment | fragment sites |
+|---|---:|---:|---:|---:|
+| ground truth | 89 | 0 | 0 | 0 |
+| v9_system | 93 | 7 | 13 | 14 |
+| v10_system | 94 | 7 | 15 | 16 |
+| v12 | 88 | 8 | 14 | 16 |
+| v13 | 92 | 8 | 16 | 20 |
+
+The counts are unchanged, and the timestamps give the reason:
+**30.00 s, 60.38 s, 86.62 s, 162.52 s — Whisper's 30-second window edges.** The
+artifacts are words straddling a window boundary, whose tail is emitted as the
+first token of the *next* segment. A merge that resets at each segment boundary
+treats that tail as a word start, so it repairs nothing.
+
+Fixed by merging over the whole decode, plus an unconditional rule that a token
+opening with a Bengali dependent sign never starts a word (it only ever attaches
+to a preceding letter). Unfixable residue: the very first word of the stream at
+0.03 s ("্যাপ"), whose head was lost by the decoder — there is no preceding word
+to merge it into.
 
 ## Caveats carried by every row
 

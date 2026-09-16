@@ -137,45 +137,57 @@ def _assign_word_to_turn(
 
 
 
-def _merge_into_words(tokens) -> List[WordToken]:
+#: Bengali dependent signs (vowel signs, virama, nukta...). These only ever
+#: attach to a preceding letter, so a token opening with one cannot start a word.
+_COMBINING = set("\u09bc\u09be\u09bf\u09c0\u09c1\u09c2\u09c3\u09c4\u09c7\u09c8"
+                 "\u09cb\u09cc\u09cd\u09d7\u09e2\u09e3")
+
+
+def _merge_into_words(segments) -> List[WordToken]:
     """Rebuild whole words from faster-whisper's sub-word tokens.
 
-    faster-whisper reports word timestamps at token granularity, and the only
-    thing distinguishing a token that *starts* a word from one that continues
-    the previous word is a leading space. The old code did
-    ``word.word.strip()`` and then joined every token with ``" "``, which
-    destroys exactly that information: "শুরুর" became a cue beginning "ুরুর",
-    and "সত্যকে" became "সত ্যকে".
+    Two things make this easy to get wrong.
 
-    The damage is not only cosmetic. Speaker assignment runs per token, so the
-    two halves of one word could land in different diarization turns, putting
-    half a word under the wrong speaker.
-
-    So the marker is preserved, continuations are concatenated onto the
-    preceding word (extending its end time), and the merge happens here —
-    before any diarization is consulted — so a word is never divided between
+    First, a leading space is the only marker that a token *starts* a word; a
+    token without one continues the previous word. The old code stripped that
+    space and then joined every token with ``" "``, which splits words apart:
+    "শুরুর" became a cue beginning "ুরুর", "সত্যকে" became "সত ্যকে". Speaker
+    assignment runs per token, so a split word could also be divided between
     two speakers.
 
-    If no token carries a leading space at all, the convention is absent
-    (a different tokenizer, or already-merged words) and merging would fuse the
-    whole stream into one word; in that case each token is kept as its own word.
+    Second - and this is why merging *per segment* is not enough - a segment
+    boundary is not a word boundary. Whisper decodes in 30-second windows, so
+    a word straddling a window edge has its tail emitted as the first token of
+    the next segment. Treating each segment's first token as a word start
+    leaves exactly those tails behind, at 30.00 s, 60.38 s and the other
+    window edges. The merge therefore runs over the whole decode.
+
+    A token opening with a Bengali dependent sign can never start a word, so
+    it is merged into the previous one even when it does carry a leading space.
+
+    If no token carries a leading space at all, the convention is absent (a
+    different tokenizer, or already-merged words) and merging would fuse the
+    entire stream into one word; in that case every token is kept as its own
+    word.
     """
-    toks = [t for t in tokens if t.word and t.word.strip()]
-    if not toks:
+    stream = [t for segment in segments for t in (segment.words or [])
+              if t.word and t.word.strip()]
+    if not stream:
         return []
-    if not any(t.word[:1].isspace() for t in toks):
+    if not any(t.word[:1].isspace() for t in stream):
         return [WordToken(word=t.word.strip(), start=t.start, end=t.end)
-                for t in toks]
+                for t in stream]
 
     words: List[WordToken] = []
-    for token in toks:
+    for token in stream:
         text = token.word.strip()
-        if token.word[:1].isspace() or not words:
-            words.append(WordToken(word=text, start=token.start, end=token.end))
+        continues_previous = bool(words) and (
+            not token.word[:1].isspace() or text[0] in _COMBINING)
+        if continues_previous:
+            words[-1].word += text
+            words[-1].end = token.end
         else:
-            previous = words[-1]
-            previous.word += text
-            previous.end = token.end
+            words.append(WordToken(word=text, start=token.start, end=token.end))
     return words
 
 
@@ -222,16 +234,13 @@ def transcribe_audio(
     print(f"[transcription] language={info.language} "
           f"(p={info.language_probability:.2f}) duration={info.duration:.1f}s")
 
-    words: List[WordToken] = []
-    full_text_parts = []
+    # transcribe() returns a generator; materialise it so the word merge below
+    # can run over the whole decode rather than segment by segment.
+    segments = list(segments)
 
-    for segment in segments:
-        full_text_parts.append(segment.text)
-        # Merge per segment: a new segment is a fresh utterance, so a token at
-        # its start begins a word even without a leading space.
-        words.extend(_merge_into_words(segment.words or []))
+    words: List[WordToken] = _merge_into_words(segments)
 
-    full_text = " ".join(full_text_parts).strip()
+    full_text = " ".join(segment.text for segment in segments).strip()
 
     if not words:
         print("[transcription] WARNING: no word timestamps produced; fusion "
