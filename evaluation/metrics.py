@@ -230,16 +230,29 @@ def speaker_name_accuracy(
     reference_turns: List[DiarizationSegment],     # speaker_id = TRUE NAME
     final_segments: List[FinalSegment],            # speaker = resolved name
 ) -> float:
-    """Fraction of reference speaking time labelled with the correct name."""
+    """Fraction of reference speaking time labelled with the correct name.
+
+    Correctly-labelled time is the UNION of the matching hypothesis segments
+    clipped to the turn. Summing them instead lets overlapping hypothesis
+    segments -- which broadcast talk-show output is full of -- credit the same
+    second twice and push the score above 1.0.
+    """
     total = correct = 0.0
     for turn in reference_turns:
         total += turn.end - turn.start
-        covered = [
-            fs for fs in final_segments
+        spans = sorted(
+            (max(fs.start, turn.start), min(fs.end, turn.end))
+            for fs in final_segments
             if fs.speaker == turn.speaker_id and
             min(fs.end, turn.end) > max(fs.start, turn.start)
-        ]
-        correct += sum(min(fs.end, turn.end) - max(fs.start, turn.start) for fs in covered)
+        )
+        merged: List[List[float]] = []
+        for s, e in spans:
+            if merged and s <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], e)
+            else:
+                merged.append([s, e])
+        correct += sum(e - s for s, e in merged)
     return correct / total if total else 0.0
 
 

@@ -1,0 +1,16 @@
+{
+  "_comment": "Canonical identities for this episode. The diarization cluster -> name mapping (SPEAKER_00 -> ...) is a property of a given run, not of the annotation; derive it from that run's result.json. Zahed Ur Rahman is NOT in this episode.",
+  "canonical": {
+    "Dr_Abdul_Noor_Tushar": "Dr Abdul Noor Tushar",
+    "Barrister_A_S_M_Shahriar_Kabir": "Barrister A S M Shahriar Kabir",
+    "Dr_Md_Tawohidul_Haque": "Dr Md Tawohidul Haque"
+  },
+  "registry_photo": {
+    "Dr_Abdul_Noor_Tushar": "data/registry/Dr_Abdul_Noor_Tushar.jpg",
+    "Barrister_A_S_M_Shahriar_Kabir": "data/registry/Barrister_A_S_M_Shahriar_Kabir.jpg",
+    "Dr_Md_Tawohidul_Haque": "data/registry/Dr_Md_Tawohidul_Haque.jpg"
+  },
+  "absent_from_episode": [
+    "Zahed Ur Rahman"
+  ]
+}

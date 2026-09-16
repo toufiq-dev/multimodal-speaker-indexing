@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "videos": [
+    {
+      "id": "rtv_goll_table",
+      "source": "https://youtu.be/t2l5UlEBpz0",
+      "media_path": "../data/input/rtv_goll_table.mp4",
+      "duration_sec": 409.0,
+      "language": "bn",
+      "num_speakers": 3,
+      "registry_dir": "../data/registry",
+      "ground_truth": {
+        "transcript_json": "../data/gt/rtv_goll_table/transcript.json",
+        "rttm": "../data/gt/rtv_goll_table/reference.rttm",
+        "speaker_map": "../data/gt/rtv_goll_table/speaker_map.json"
+      },
+      "split": "test",
+      "notes": "RTV Goll Table. 3 speakers, frequent overlap and interruption. Timestamps inherited from the v9 system segmentation: see data/gt/rtv_goll_table/README.md for reliability tiers. Zahed Ur Rahman is NOT in this episode despite a registry photo."
+    }
+  ]
+}

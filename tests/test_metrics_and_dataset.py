@@ -95,3 +95,16 @@ def test_registry_validation_detects_missing_photos(tmp_path):
     missing = validate_registry(reg, ["host", "guest 1"])
     assert missing == ["guest 1"]
     assert validate_registry(tmp_path / "nope", ["a"]) == ["a"]
+
+
+def test_speaker_name_accuracy_no_double_count_on_overlap():
+    """Overlapping hypothesis segments must not credit the same second twice."""
+    ref = [DiarizationSegment(0.0, 10.0, "Alice")]
+    finals = [
+        FinalSegment(0.0, 8.0, "Alice", "a"),
+        FinalSegment(2.0, 9.0, "Alice", "b"),   # overlaps the first
+        FinalSegment(1.0, 7.0, "Alice", "c"),   # nested
+    ]
+    acc = speaker_name_accuracy(ref, finals)
+    assert acc == pytest.approx(0.9)            # union 0-9 of 10s, not 2.1
+    assert acc <= 1.0

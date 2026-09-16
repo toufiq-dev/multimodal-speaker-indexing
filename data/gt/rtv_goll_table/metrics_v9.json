@@ -1,0 +1,56 @@
+{
+  "tag": "v9",
+  "n_hyp_segments": 93,
+  "scoring_region_sec": 261.51,
+  "scoring_region_pct": 63.9,
+  "_primary_metric": "speaker_name_accuracy.reliable_uem",
+  "speaker_name_accuracy": {
+    "reliable_uem": 0.8899,
+    "overlapping_turns": 0.7803,
+    "non_overlapping_turns": 0.9682,
+    "n_overlapping": 21,
+    "n_non_overlapping": 49,
+    "per_speaker": {
+      "Dr Abdul Noor Tushar": 0.9853,
+      "Barrister A S M Shahriar Kabir": 0.8775,
+      "Dr Md Tawohidul Haque": 0.5448
+    },
+    "all_turns_incl_unreliable": 0.8968
+  },
+  "der_jer": {
+    "_warning": "reference boundaries are v9's own, so this reflects speaker confusion far more than boundary quality",
+    "uem_collar_0.25": {
+      "DER": 0.1358,
+      "JER": 0.2369,
+      "false_alarm": 0.0021,
+      "missed_detection": 0.0,
+      "confusion": 0.1337
+    },
+    "uem_collar_0.0": {
+      "DER": 0.143,
+      "JER": 0.2328,
+      "false_alarm": 0.0,
+      "missed_detection": 0.0,
+      "confusion": 0.143
+    }
+  },
+  "asr": {
+    "_warning": "LOWER BOUND: the annotation was edited from v9's own text",
+    "corpus_wer": 0.3675,
+    "corpus_cer": 0.3128,
+    "cpwer": 0.5141,
+    "cpwer_permutations": 24,
+    "gt_words": 1132,
+    "hyp_words": 924,
+    "word_recall_proxy": 0.8163
+  },
+  "label_inventory": {
+    "Dr Md Tawohidul Haque": 11,
+    "Dr Abdul Noor Tushar": 59,
+    "Barrister A S M Shahriar Kabir": 21,
+    "face_cluster_3": 2
+  },
+  "spurious_labels": [
+    "face_cluster_3"
+  ]
+}

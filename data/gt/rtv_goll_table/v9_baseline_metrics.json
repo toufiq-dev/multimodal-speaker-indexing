@@ -1,0 +1,115 @@
+{
+  "episode": "rtv_goll_table",
+  "hypothesis": "v9_system.srt (untouched)",
+  "n_gt_turns": 99,
+  "n_v9_cues": 93,
+  "cue_level_speaker_accuracy": {
+    "_definition": "fraction of the 89 GT turns that share a v9 cue whose v9 label equals the true speaker; boundaries identical on both sides, so this isolates identity assignment",
+    "n_aligned_turns": 89,
+    "accuracy": 0.8202,
+    "word_weighted_accuracy": 0.8062,
+    "per_speaker_recall": {
+      "Barrister A S M Shahriar Kabir": 0.6818,
+      "Dr Abdul Noor Tushar": 0.9231,
+      "Dr Md Tawohidul Haque": 0.6667
+    },
+    "per_speaker_n": {
+      "Barrister A S M Shahriar Kabir": 22,
+      "Dr Abdul Noor Tushar": 52,
+      "Dr Md Tawohidul Haque": 15
+    },
+    "confusion_ref_to_pred": {
+      "Dr Abdul Noor Tushar -> Dr Abdul Noor Tushar": 48,
+      "Barrister A S M Shahriar Kabir -> Barrister A S M Shahriar Kabir": 15,
+      "Dr Md Tawohidul Haque -> Dr Md Tawohidul Haque": 10,
+      "Dr Md Tawohidul Haque -> Dr Abdul Noor Tushar": 4,
+      "Dr Abdul Noor Tushar -> Barrister A S M Shahriar Kabir": 4,
+      "Barrister A S M Shahriar Kabir -> Dr Abdul Noor Tushar": 4,
+      "Barrister A S M Shahriar Kabir -> face_cluster_3": 2,
+      "Dr Md Tawohidul Haque -> Barrister A S M Shahriar Kabir": 1,
+      "Barrister A S M Shahriar Kabir -> Dr Md Tawohidul Haque": 1
+    }
+  },
+  "accuracy_by_overlap": {
+    "_definition": "a turn is 'overlapping' if its time span intersects any other annotated turn; v9 label correctness is then split on that flag",
+    "as_annotated": {
+      "overlapping": {
+        "n": 35,
+        "accuracy": 0.6857
+      },
+      "non_overlapping": {
+        "n": 54,
+        "accuracy": 0.9074
+      }
+    },
+    "excl_implausible_span": {
+      "overlapping": {
+        "n": 32,
+        "accuracy": 0.7188
+      },
+      "non_overlapping": {
+        "n": 57,
+        "accuracy": 0.8772
+      }
+    },
+    "reliable_timing_only": {
+      "overlapping": {
+        "n": 29,
+        "accuracy": 0.6897
+      },
+      "non_overlapping": {
+        "n": 60,
+        "accuracy": 0.8833
+      }
+    }
+  },
+  "time_weighted_speaker_name_accuracy": {
+    "all_turns": 0.8968,
+    "reliable_timing_only": 0.8899,
+    "_note": "reliable_timing_only is the defensible figure"
+  },
+  "der_jer": {
+    "_warning": "GT timestamps ARE v9's own timestamps, so miss/false-alarm are structurally near-zero: this measures speaker CONFUSION on fixed boundaries, NOT diarization boundary quality. A true DER needs independently annotated boundaries, which this annotation does not provide.",
+    "scoring_region_sec": 261.51,
+    "scoring_region_pct_of_episode": 63.9,
+    "uem_restricted_collar_0.25": {
+      "DER": 0.1358,
+      "JER": 0.2369,
+      "false_alarm": 0.0021,
+      "missed_detection": 0.0,
+      "confusion": 0.1337
+    },
+    "uem_restricted_collar_0.0": {
+      "DER": 0.143,
+      "JER": 0.2328,
+      "false_alarm": 0.0,
+      "missed_detection": 0.0,
+      "confusion": 0.143
+    },
+    "_unrestricted_note": "without the UEM the hypothesis is scored over 353.6s against a 261.5s reference, inflating false alarm to ~0.39; reported for transparency",
+    "no_uem_collar_0.25": {
+      "DER": 0.5268,
+      "JER": 0.2369,
+      "false_alarm": 0.3932,
+      "missed_detection": 0.0,
+      "confusion": 0.1337
+    }
+  },
+  "asr": {
+    "_warning": "the annotation was produced by CORRECTING v9's own text, so these are LOWER BOUNDS on true error",
+    "corpus_wer": 0.3675,
+    "corpus_cer": 0.3128,
+    "aligned_cue_wer_wordweighted": 0.3347,
+    "cpwer": 0.5141,
+    "cpwer_permutations": 24,
+    "gt_words": 1132,
+    "v9_words": 924,
+    "words_only_in_untimed_gt_insertions": 131
+  },
+  "v9_label_inventory": {
+    "Dr Md Tawohidul Haque": 11,
+    "Dr Abdul Noor Tushar": 59,
+    "Barrister A S M Shahriar Kabir": 21,
+    "face_cluster_3": 2
+  }
+}

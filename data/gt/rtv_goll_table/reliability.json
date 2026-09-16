@@ -1,0 +1,382 @@
+{
+  "episode": "rtv_goll_table",
+  "duration_sec": 409.0,
+  "n_turns": 99,
+  "turns_by_speaker": {
+    "Dr Abdul Noor Tushar": 57,
+    "Barrister A S M Shahriar Kabir": 22,
+    "Dr Md Tawohidul Haque": 20
+  },
+  "speaking_time_by_speaker": {
+    "Dr Abdul Noor Tushar": 183.29,
+    "Barrister A S M Shahriar Kabir": 155.01,
+    "Dr Md Tawohidul Haque": 55.27
+  },
+  "turns_by_timing_quality": {
+    "reliable": 70,
+    "implausible_rate": 18,
+    "inferred": 10,
+    "implausible_span": 1
+  },
+  "seconds_by_timing_quality": {
+    "reliable": 274.74,
+    "implausible_rate": 23.15,
+    "inferred": 19.34,
+    "implausible_span": 76.34
+  },
+  "n_overlapping_turns": 38,
+  "scorable_for_der": 70,
+  "excluded_from_der": [
+    {
+      "start": 30.0,
+      "end": 35.502,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 7,
+      "text": "বিএনপি তো গিয়ে বলে নাই এনসিপি নির্বাচন কমিশনকে যে নির্বাচন পিছায় দেন এ"
+    },
+    {
+      "start": 66.974,
+      "end": 67.024,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "implausible_rate",
+      "src_v9_index": 17,
+      "text": "না"
+    },
+    {
+      "start": 74.989,
+      "end": 75.192,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 20,
+      "text": "অসুস্থতাকে কেন্দ্র করে কোন রাজনৈতিক সংকটের বিষয় না এজন্য"
+    },
+    {
+      "start": 79.09,
+      "end": 79.124,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "না এটা তাদের বক্তব্য"
+    },
+    {
+      "start": 79.124,
+      "end": 79.157,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "তারা কেন বক্তব্য দিবে"
+    },
+    {
+      "start": 110.174,
+      "end": 111.034,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 27,
+      "text": "পিছনেরটা আমি জানি না আমি সামনে যেটা দেখতে পাই সেটা দেখতে পাই পিছনের খব"
+    },
+    {
+      "start": 111.22,
+      "end": 111.27,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 28,
+      "text": "দ্বিতীয় হচ্ছে শেরেবাংলা প্রথম মেয়র না মেয়র হচ্ছেন হোসেন শহীদ সোহরাওয়ার"
+    },
+    {
+      "start": 119.607,
+      "end": 119.843,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "implausible_rate",
+      "src_v9_index": 30,
+      "text": "হোসেন শহীদ সোহরাওয়ার্দী মাওলানা ভাসানী এরা আওয়ামী লীগ প্রতিষ্ঠা করেছিল"
+    },
+    {
+      "start": 136.6,
+      "end": 136.617,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 32,
+      "text": "সাহেব ঐখানে"
+    },
+    {
+      "start": 143.89,
+      "end": 144.514,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 35,
+      "text": "একটু দেখেন কারণ আমি কলকাতা দল গেছিলাম তখন"
+    },
+    {
+      "start": 147.653,
+      "end": 148.26,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 36,
+      "text": "ওখানে যে ছবি আছে সেখানে লেখা আছে প্রথম মেয়র শেরেবাংলা"
+    },
+    {
+      "start": 162.165,
+      "end": 162.52,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "ডাক্তার আবদুল নুর তুষার ভাই যে আলোচনা শুনছিলাম আপনি বলছিলেন যে স্বাধীন"
+    },
+    {
+      "start": 200.556,
+      "end": 200.776,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "নাহ শাহরিয়ার কবির ভাই বলতেছিলেন এটা ইন্ডিয়া লিখে দিয়েছে"
+    },
+    {
+      "start": 200.776,
+      "end": 200.995,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "কেন জানি ইন্ডিয়ার লেখালেখি সবাই খুব বিশ্বাস করে মানে মনে করে যে ইন্ডিয়"
+    },
+    {
+      "start": 249.629,
+      "end": 325.971,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_span",
+      "src_v9_index": 61,
+      "text": "আপনি এই যে কথাগুলো এটা মিসলিডিং"
+    },
+    {
+      "start": 259.18,
+      "end": 261.475,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 64,
+      "text": "বলে দিচ্ছি আওয়ামী লীগ এতদিন ধরে এই কথা বলেনি আমরা বলতেছি আমাদের স্বাধী"
+    },
+    {
+      "start": 319.508,
+      "end": 330.392,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 65,
+      "text": "আলাদা সত্বর মিথ্যা কেন গত তেপ্পান্ন বছর যে মিথ্যা গিলানো হল মুক্তিযুদ্"
+    },
+    {
+      "start": 330.392,
+      "end": 330.393,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "উপস্থাপক সাহেব আমরা কি চাইলে যে কেউ নিজের ইচ্ছামত কথা বলতে পারে"
+    },
+    {
+      "start": 330.393,
+      "end": 330.394,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "না আমার কাছে আর ফিরেন না যখন তখন ঢুকে পড়ব এবং বলতে থাকব"
+    },
+    {
+      "start": 330.865,
+      "end": 330.966,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 69,
+      "text": "এরপর"
+    },
+    {
+      "start": 333.835,
+      "end": 333.885,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "implausible_rate",
+      "src_v9_index": 72,
+      "text": "না না প্লিজ"
+    },
+    {
+      "start": 337.53,
+      "end": 337.531,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "তুষার ভাই শুনতে চাই আপনাকে"
+    },
+    {
+      "start": 339.977,
+      "end": 340.028,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "implausible_rate",
+      "src_v9_index": 78,
+      "text": "আমি"
+    },
+    {
+      "start": 342.66,
+      "end": 342.998,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 81,
+      "text": "প্রোগ্রামের সময় যখন সত্য বললে সত্যকে ফেস করতে হবে এবং সত্য যেখানে সত্য"
+    },
+    {
+      "start": 356.869,
+      "end": 358.05,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "implausible_rate",
+      "src_v9_index": 83,
+      "text": "শাহরিয়ার ভাই আপনি তুষার ভাইয়ের আলোচনার প্রেক্ষাপটে আপনার মতামত তো শুনল"
+    },
+    {
+      "start": 360.48,
+      "end": 360.531,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "implausible_rate",
+      "src_v9_index": 84,
+      "text": "করলেন তার প্রেক্ষাপটে তুষার ভাইয়ের বক্তব্য"
+    },
+    {
+      "start": 360.565,
+      "end": 360.615,
+      "speaker": "Barrister A S M Shahriar Kabir",
+      "reason": "implausible_rate",
+      "src_v9_index": 85,
+      "text": "একটা বই খালি এই এক সেকেন্ডে বলে দেই কেন আমরা বই নিয়ে আসি আমরা তো অবশ্য"
+    },
+    {
+      "start": 361.965,
+      "end": 371.204,
+      "speaker": "Dr Md Tawohidul Haque",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "অবশ্যই রেফারেন্স হিসেবে আপনি তো উল্লেখ করলেন আপনার আলোচনার প্রেক্ষাপটে"
+    },
+    {
+      "start": 371.204,
+      "end": 380.444,
+      "speaker": "Dr Abdul Noor Tushar",
+      "reason": "inferred",
+      "src_v9_index": null,
+      "text": "আমার কিছু বলার নাই উনি সারাদিন ভারতের লেখা বইপত্র পড়েন তাজউদ্দিনের বই "
+    }
+  ],
+  "repairs": {
+    "R1_index_recovered": [
+      {
+        "recovered_index": 90,
+        "start": 380.444,
+        "end": 386.89,
+        "note": "cue read as speaker '00' by a naive SRT parser"
+      }
+    ],
+    "R2_cue_split": [
+      {
+        "src_index": null,
+        "start": null,
+        "n_speakers": 2,
+        "speakers": [
+          "Dr Md Tawohidul Haque",
+          "Dr Abdul Noor Tushar"
+        ]
+      }
+    ],
+    "R3_timing_inferred": [
+      {
+        "speaker": "Dr Md Tawohidul Haque",
+        "text": "না এটা তাদের বক্তব্য",
+        "placed_in": [
+          79.09,
+          79.157
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Abdul Noor Tushar",
+        "text": "তারা কেন বক্তব্য দিবে",
+        "placed_in": [
+          79.09,
+          79.157
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Md Tawohidul Haque",
+        "text": "ডাক্তার আবদুল নুর তুষার ভাই যে আলোচনা শুনছিলাম আপনি বলছিলেন ",
+        "placed_in": [
+          162.165,
+          162.52
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Md Tawohidul Haque",
+        "text": "নাহ শাহরিয়ার কবির ভাই বলতেছিলেন এটা ইন্ডিয়া লিখে দিয়েছে",
+        "placed_in": [
+          200.556,
+          200.995
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Abdul Noor Tushar",
+        "text": "কেন জানি ইন্ডিয়ার লেখালেখি সবাই খুব বিশ্বাস করে মানে মনে করে",
+        "placed_in": [
+          200.556,
+          200.995
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Abdul Noor Tushar",
+        "text": "উপস্থাপক সাহেব আমরা কি চাইলে যে কেউ নিজের ইচ্ছামত কথা বলতে প",
+        "placed_in": [
+          330.392,
+          325.971
+        ],
+        "bounded": false
+      },
+      {
+        "speaker": "Dr Abdul Noor Tushar",
+        "text": "না আমার কাছে আর ফিরেন না যখন তখন ঢুকে পড়ব এবং বলতে থাকব",
+        "placed_in": [
+          330.393,
+          327.034
+        ],
+        "bounded": false
+      },
+      {
+        "speaker": "Dr Md Tawohidul Haque",
+        "text": "তুষার ভাই শুনতে চাই আপনাকে",
+        "placed_in": [
+          337.53,
+          337.53
+        ],
+        "bounded": false
+      },
+      {
+        "speaker": "Dr Md Tawohidul Haque",
+        "text": "অবশ্যই রেফারেন্স হিসেবে আপনি তো উল্লেখ করলেন আপনার আলোচনার প",
+        "placed_in": [
+          361.965,
+          380.444
+        ],
+        "bounded": true
+      },
+      {
+        "speaker": "Dr Abdul Noor Tushar",
+        "text": "আমার কিছু বলার নাই উনি সারাদিন ভারতের লেখা বইপত্র পড়েন তাজউদ",
+        "placed_in": [
+          361.965,
+          380.444
+        ],
+        "bounded": true
+      }
+    ],
+    "label_fixes": []
+  },
+  "caveats": [
+    "Timestamps are the v9 system's own segmentation, not re-annotated. DER/JER computed against this reference therefore measure speaker LABEL assignment on fixed boundaries, not boundary quality.",
+    "Transcript text was produced by correcting v9's output, so WER against it is a LOWER BOUND on true WER (annotator anchoring).",
+    "Turns marked 'inferred' have accurate text but no real timestamps."
+  ]
+}
