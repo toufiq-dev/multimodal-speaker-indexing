@@ -88,11 +88,25 @@ class GatingFusion:
     no learned component anymore.
     """
 
-    def __init__(self, ordered_names: Optional[List[str]] = None):
+    def __init__(
+        self,
+        ordered_names: Optional[List[str]] = None,
+        voice_matches: Optional[Dict[str, Tuple[str, float]]] = None,
+        voice_policy: Optional[str] = None,
+    ):
         self.ordered_names = ordered_names or []
         #: Per-speaker face evidence from the last resolve_identities() call,
         #: persisted by callers for threshold calibration.
         self.last_diagnostics: Dict[str, Dict] = {}
+        #: Accepted enrolled-voiceprint matches (speaker_id -> (name, cosine)),
+        #: produced by engines.voice and injected here. Empty when voice
+        #: evidence is off or unavailable, which is the default.
+        self.voice_matches: Dict[str, Tuple[str, float]] = dict(voice_matches or {})
+        self.voice_policy: str = (voice_policy or config.VOICE_POLICY or "off").lower()
+        #: What the voice pass did to each speaker, for voice_diagnostics.json.
+        #: Needed because "voice agreed with the face" and "voice was ignored"
+        #: look identical in the final transcript but mean opposite things.
+        self.last_voice_decisions: Dict[str, Dict] = {}
         #: Per-TURN identity resolved from the speaking face track, keyed by
         #: (start, end, speaker_id). Preferred over the per-speaker label.
         self.turn_identities: Dict[Tuple[float, float, str], Tuple[str, float]] = {}
@@ -351,10 +365,18 @@ class GatingFusion:
         Cascade (first match wins):
           0. Ground-truth annotation overrides (evaluation mode).
           1. Registered face recognition above threshold.
+          1b. Enrolled voiceprint match above threshold (VOICE_POLICY != off).
           2. Host anchor ("আমি <Name>") spoken by that very speaker.
           3. Greedy name<->speaker matching on co-occurrence evidence.
           4. Face cluster labels.
           5. Generic Speaker_N.
+
+        Step 1b sits after the face pass by design. With VOICE_POLICY=fallback it
+        can only fill speakers the face pass left unnamed, so it is strictly
+        additive and cannot overwrite a cited face match. VOICE_POLICY=override
+        additionally lets a materially stronger voiceprint displace a face name
+        — which is the case that matters for overlapping speech, where the face
+        pass has a confident match to someone who is on screen but not talking.
         """
         resolved: Dict[str, Tuple[str, float]] = {}
         used_names: set = set()
@@ -419,6 +441,53 @@ class GatingFusion:
                 if name not in used_names:
                     resolved[spk] = (name, round(conf, 3))
                     used_names.add(name)
+
+        # Pass 1b: enrolled voiceprints. The face pass answers "who is on
+        # screen"; in an overlap the camera frames both speakers, so it cannot
+        # say which of them is talking — the voiceprint is derived from the
+        # speech itself. It runs BEFORE the textual heuristics because a
+        # measured acoustic match is far stronger evidence than a co-occurrence
+        # guess, but AFTER the face pass so that `fallback` is strictly
+        # additive and cannot regress a face-named speaker.
+        self.last_voice_decisions = {}
+        if self.voice_policy != "off" and self.voice_matches:
+            for spk in speaker_ids:
+                entry = self.voice_matches.get(spk)
+                if not entry:
+                    continue
+                vname, vconf = entry[0], float(entry[1])
+                face = resolved.get(spk)
+
+                if face is None:
+                    if vname in used_names:
+                        action = "skipped_name_taken"
+                    else:
+                        resolved[spk] = (vname, round(vconf, 3))
+                        used_names.add(vname)
+                        action = "filled"
+                elif vname == face[0]:
+                    action = "agreed_with_face"
+                elif vname in used_names:
+                    action = "skipped_name_taken"
+                elif (self.voice_policy == "override"
+                      and vconf >= float(face[1]) + config.VOICE_OVERRIDE_MARGIN):
+                    # Displace the face name: the voiceprint is materially
+                    # stronger, which is exactly the diarization-plus-face
+                    # agreement-on-the-wrong-panellist failure.
+                    used_names.discard(face[0])
+                    resolved[spk] = (vname, round(vconf, 3))
+                    used_names.add(vname)
+                    action = "overrode_face"
+                else:
+                    action = "kept_face"
+
+                self.last_voice_decisions[spk] = {
+                    "voice_name": vname,
+                    "voice_conf": round(vconf, 3),
+                    "face_name": face[0] if face else None,
+                    "face_conf": round(float(face[1]), 3) if face else None,
+                    "action": action,
+                }
 
         # Pass 2: host self-intro anchor.
         for spk, name, hit_count in self._host_anchor_evidence(
@@ -590,6 +659,8 @@ def run_fusion_pipeline(
     faces: List[FaceOccurrence],
     ordered_names: Optional[List[str]] = None,
     ground_truth_labels: Optional[Dict[str, str]] = None,
+    voice_matches: Optional[Dict[str, Tuple[str, float]]] = None,
+    voice_policy: Optional[str] = None,
 ) -> List[FinalSegment]:
     """Run full fusion pipeline.
 
@@ -600,11 +671,18 @@ def run_fusion_pipeline(
         ordered_names: Names extracted from NLP intro (optional).
         ground_truth_labels: Optional annotated mapping speaker_id -> real
             name (evaluation mode / registry-less datasets).
+        voice_matches: Accepted voiceprint matches (speaker_id -> (name,
+            cosine)) from engines.voice. Empty/None means face-and-text only,
+            which is the default and preserves all previous behaviour.
+        voice_policy: Overrides config.VOICE_POLICY ('off' | 'fallback' |
+            'override'); mainly for callers that need a per-run override.
 
     Returns:
         List of FinalSegment with resolved speaker names.
     """
-    fusion = GatingFusion(ordered_names=ordered_names)
+    fusion = GatingFusion(ordered_names=ordered_names,
+                          voice_matches=voice_matches,
+                          voice_policy=voice_policy)
     resolved = fusion.resolve_identities(
         diarization, transcribed, faces, ground_truth_labels=ground_truth_labels)
     return fusion.create_final_segments(diarization, transcribed, resolved)

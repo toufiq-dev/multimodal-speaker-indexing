@@ -166,7 +166,7 @@ def _run_engines(
     from engines.diarization import run_diarization
     from engines.transcription import align_transcription_with_diarization
     from engines.nlp import extract_speaker_names_from_intro
-    from engines.fusion import run_fusion_pipeline
+    from engines.fusion import GatingFusion
     from engines.vision import run_vision_pipeline
     from main import _write_json, _write_srt, _build_rag_index
     from runtime import release_gpu_memory
@@ -175,6 +175,38 @@ def _run_engines(
     diarization = run_diarization(str(audio_path))
     print(f"    {len(set(s.speaker_id for s in diarization))} speakers, "
           f"{len(diarization)} turns")
+
+    # Persist the turns themselves. They were never written before, which made
+    # a finished run impossible to analyse offline: scripts/voice_verify.py
+    # re-scores the voiceprints against exactly this list, and every
+    # post-mortem of an identity error otherwise needs diarization re-run.
+    (output_dir / "diarization.json").write_text(
+        json.dumps([{"start": s.start, "end": s.end, "speaker_id": s.speaker_id}
+                    for s in diarization], ensure_ascii=False, indent=2),
+        encoding="utf-8")
+    print(f"    diarization.json <- {len(diarization)} turns")
+    release_gpu_memory()
+
+    # [1b] Voice-reference evidence. Placed here rather than beside fusion
+    # because the diarization model has just been released and the embedding
+    # model does the same kind of GPU work; the two never share VRAM, and the
+    # embedding pass is the one stage that needs the episode audio while it is
+    # still guaranteed to exist in this process's scratch dir.
+    voice_matches: dict = {}
+    try:
+        from engines.voice import build_voice_evidence
+        evidence = build_voice_evidence(diarization, str(audio_path))
+        voice_matches = evidence.matches
+        if evidence.available:
+            named = sorted({n for n, _ in voice_matches.values()})
+            print(f"    voice: {len(voice_matches)} cluster(s) named -> {named}")
+        else:
+            print(f"    voice: no evidence ({evidence.note or 'none'})")
+        evidence.persist(output_dir)
+        del evidence
+    except Exception as e:
+        print(f"    voice stage failed ({e.__class__.__name__}: {e}); "
+              f"continuing face-only")
     release_gpu_memory()
 
     print(f"[2] transcribing (slow stage)...")
@@ -225,20 +257,42 @@ def _run_engines(
     release_gpu_memory()
 
     print(f"[5] fusing modalities...")
-    final_segments = run_fusion_pipeline(
-        diarization, transcribed, faces, ordered_names)
+    fusion = GatingFusion(ordered_names=ordered_names,
+                          voice_matches=voice_matches)
+    resolved = fusion.resolve_identities(diarization, transcribed, faces)
+    final_segments = fusion.create_final_segments(
+        diarization, transcribed, resolved)
     print(f"    {len(final_segments)} final segments")
 
     # Persist the face evidence behind identity resolution. The registry
     # rejection gates must be set from these measured gaps, not guessed.
+    # Read off the fusion object rather than recomputed: fusion_diagnostics()
+    # re-derives the same per-speaker aggregation resolve_identities() has just
+    # performed, so calling it here doubled that work for an identical result.
     try:
-        from engines.fusion import fusion_diagnostics
-        diag = fusion_diagnostics(diarization, faces, ordered_names)
         (output_dir / "fusion_diagnostics.json").write_text(
-            json.dumps(diag, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"    fusion_diagnostics.json <- {len(diag)} speakers")
+            json.dumps(fusion.last_diagnostics, ensure_ascii=False, indent=2),
+            encoding="utf-8")
+        print(f"    fusion_diagnostics.json <- "
+              f"{len(fusion.last_diagnostics)} speakers")
     except Exception as e:
         print(f"    diagnostics failed ({e.__class__.__name__}: {e})")
+
+    # What voice did, which the transcript cannot show: "voice agreed with the
+    # face" and "voice was ignored" produce identical SRTs but mean opposite
+    # things when reading whether the feature helped.
+    if fusion.last_voice_decisions:
+        try:
+            (output_dir / "voice_decisions.json").write_text(
+                json.dumps(fusion.last_voice_decisions,
+                           ensure_ascii=False, indent=2),
+                encoding="utf-8")
+            tally: dict = {}
+            for d in fusion.last_voice_decisions.values():
+                tally[d["action"]] = tally.get(d["action"], 0) + 1
+            print(f"    voice_decisions.json <- {tally}")
+        except Exception as e:
+            print(f"    voice decisions failed ({e.__class__.__name__}: {e})")
 
     _write_json(final_segments, output_dir / "result.json")
     _write_srt(final_segments, output_dir / "subtitles.srt")
@@ -425,6 +479,13 @@ def main() -> int:
         "use_lora": args.use_lora,
         "lora_path": args.lora_path,
         "build_rag": not args.no_rag,
+        # Recorded so a run's identity behaviour is attributable after the
+        # fact: the same code at VOICE_POLICY=off and =override produces
+        # different transcripts, and the manifest must say which was used.
+        "voice_policy": config.VOICE_POLICY,
+        "voice_model": config.VOICE_MODEL or None,
+        "voice_sim_threshold": config.VOICE_SIM_THRESHOLD,
+        "voice_sim_margin": config.VOICE_SIM_MARGIN,
     })
 
     try:

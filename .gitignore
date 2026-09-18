@@ -31,13 +31,11 @@ __pycache__/
 # Virtual environments
 venv/
 env/
-.env
 .venv
 .venv-cpu/
 .venv-cpu-*/
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -86,3 +84,5 @@ taste.md
 # data
 .jpeg
 .jpg
+config.bat
+node_modules

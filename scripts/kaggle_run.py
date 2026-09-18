@@ -40,6 +40,10 @@ if _saved:
 
 
 IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+# Voice references for the voiceprint registry. Kept separate from the image
+# list because the two halves are optional independently: the pipeline must
+# still run face-only when no clips are attached.
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wma")
 
 
 def find_video(explicit: str | None = None) -> str | None:
@@ -52,15 +56,29 @@ def find_video(explicit: str | None = None) -> str | None:
 
 
 def ensure_registry(dst: str) -> list:
-    """Populate the registry from an attached dataset when it is empty."""
+    """Populate the registry from an attached dataset when a half is missing.
+
+    Photos and voice references are seeded INDEPENDENTLY. The previous version
+    returned early as soon as any image was present, so a registry carried over
+    from an earlier session kept its photos and silently never received the
+    .mp3 clips — the voice stage then reported "no audio references" for a
+    reason that had nothing to do with the attached dataset.
+    """
     os.makedirs(dst, exist_ok=True)
-    have = [f for f in os.listdir(dst) if f.lower().endswith(IMAGE_EXTS)]
-    if have:
-        return have
-    for p in glob.glob("/kaggle/input/**/*", recursive=True):
-        if p.lower().endswith(IMAGE_EXTS):
-            shutil.copy(p, os.path.join(dst, os.path.basename(p)))
-    return [f for f in os.listdir(dst) if f.lower().endswith(IMAGE_EXTS)]
+    images = [f for f in os.listdir(dst) if f.lower().endswith(IMAGE_EXTS)]
+    audio = [f for f in os.listdir(dst) if f.lower().endswith(AUDIO_EXTS)]
+
+    need_images, need_audio = not images, not audio
+    if need_images or need_audio:
+        for p in glob.glob("/kaggle/input/**/*", recursive=True):
+            low = p.lower()
+            if need_images and low.endswith(IMAGE_EXTS):
+                shutil.copy(p, os.path.join(dst, os.path.basename(p)))
+                images.append(os.path.basename(p))
+            elif need_audio and low.endswith(AUDIO_EXTS):
+                shutil.copy(p, os.path.join(dst, os.path.basename(p)))
+                audio.append(os.path.basename(p))
+    return sorted(images + audio)
 
 
 def report() -> None:
@@ -204,11 +222,20 @@ def main() -> int:
         print("WHISPER_MODEL:", ks.prepare_env()["WHISPER_MODEL"])
 
     registry = ensure_registry(args.registry)
-    print("registry     :", registry or "EMPTY (names will fall back to clusters)")
-    assert registry, (
+    n_images = sum(1 for f in registry if f.lower().endswith(IMAGE_EXTS))
+    n_audio = sum(1 for f in registry if f.lower().endswith(AUDIO_EXTS))
+    print(f"registry     : {n_images} photo(s), {n_audio} voice reference(s)")
+    assert n_images, (
         "no face photos found. Attach the msi-registry dataset (Add Input), "
         "or pass --registry with a folder that contains them."
     )
+    policy = os.environ.get("VOICE_POLICY", "off").strip().lower()
+    if policy != "off" and not n_audio:
+        print("voice        : VOICE_POLICY is on but the registry has no audio "
+              "clips — the run will be face-only. Attach the dataset holding "
+              "the <Name>.mp3 references, or unset VOICE_POLICY.")
+    elif policy != "off":
+        print(f"voice        : VOICE_POLICY={policy}")
 
     video = find_video(args.video)
     print("video        :", video)

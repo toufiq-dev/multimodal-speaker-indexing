@@ -160,6 +160,83 @@ class Config:
     # failure (a still face naming the turn) cannot recur.
     ENABLE_TURN_OVERRIDE: bool = field(
         default_factory=lambda: os.getenv("ENABLE_TURN_OVERRIDE", "1") == "1")
+
+    # --- Voice reference registry (voiceprints) --------------------------
+    # A second identity source, parallel to the face photos: one audio clip per
+    # speaker in the registry directory (data/registry/<Name>.mp3) is embedded
+    # with a speaker-verification model and matched against each diarization
+    # cluster by cosine similarity. Faces answer "who is on screen"; voices
+    # answer "who is talking", which is the question the overlapping-speech
+    # turns actually ask. See docs/VOICE_REFERENCE.md.
+    #
+    # OFF by default, deliberately. Every cosine gate below is UNMEASURED until
+    # a run has written voice_diagnostics.json, and an uncalibrated gate in the
+    # identity cascade would silently regress a working episode. Turn it on
+    # with VOICE_POLICY, read the diagnostics, then set the gates from the
+    # measured genuine/impostor separation (scripts/voice_verify.py re-scores
+    # a finished run's saved voiceprints offline, with no GPU and no audio).
+    VOICE_POLICY: str = field(
+        default_factory=lambda: os.getenv("VOICE_POLICY", "off").strip().lower())
+    #   off      -> voiceprints are not computed at all; the identity cascade
+    #               is byte-for-byte the face-only behaviour.
+    #   fallback -> voice may name only the speakers the face pass left
+    #               unnamed, ahead of the text heuristics. Strictly additive:
+    #               it cannot overwrite a cited face match.
+    #   override -> voice may additionally replace a face-assigned name when
+    #               the voiceprint match is materially stronger (see
+    #               VOICE_OVERRIDE_MARGIN). This is the mode that can repair a
+    #               cluster the face pass labelled with the wrong panellist.
+    # Speaker-verification embedding model, tried in order; the first that
+    # loads wins. wespeaker is first because pyannote/speaker-diarization-3.1
+    # already downloads it, so any account licensed for diarization is
+    # licensed for this too.
+    VOICE_MODEL_CANDIDATES: ClassVar[tuple] = (
+        "pyannote/wespeaker-voxceleb-resnet34-LM",
+        "pyannote/embedding",
+    )
+    VOICE_MODEL: str = field(default_factory=lambda: os.getenv("VOICE_MODEL", ""))
+    # Cosine gates, mirroring FACE_SIM_THRESHOLD / FACE_SIM_MARGIN. Speaker
+    # verification embeddings live on a different scale from ArcFace face
+    # embeddings, so the two must not share thresholds. These defaults are a
+    # starting point ONLY; voice_diagnostics.json reports the whole cluster x
+    # enrolled matrix so they can be replaced with measured values.
+    VOICE_SIM_THRESHOLD: float = field(
+        default_factory=lambda: _env_float("VOICE_SIM_THRESHOLD", 0.45))
+    VOICE_SIM_MARGIN: float = field(
+        default_factory=lambda: _env_float("VOICE_SIM_MARGIN", 0.05))
+    # How much stronger a voice match must be than the face match it displaces
+    # under VOICE_POLICY=override. Prevents two comparable evidence sources
+    # from fighting over the same cluster.
+    VOICE_OVERRIDE_MARGIN: float = field(
+        default_factory=lambda: _env_float("VOICE_OVERRIDE_MARGIN", 0.10))
+    # A cluster whose own windows disagree (low coherence) is either impure or
+    # too short to embed; this optional floor rejects it. 0.0 disables the gate
+    # and leaves coherence as a reported diagnostic only.
+    VOICE_MIN_COHERENCE: float = field(
+        default_factory=lambda: _env_float("VOICE_MIN_COHERENCE", 0.0))
+    # Enrolment windowing. Windows are embedded independently and reduced with
+    # an outlier-trimmed centroid: a reference clip of a real broadcast
+    # contains other voices, music and silence, and a plain mean would drag the
+    # voiceprint toward whoever else appears in it.
+    VOICE_ENROLL_WINDOW_SEC: float = 3.0
+    VOICE_ENROLL_HOP_SEC: float = 1.5
+    # Caps the enrolment cost. 40 windows is 2 minutes of speech, far more than
+    # a 256-d speaker embedding needs, and it bounds the model calls for a
+    # 12-minute reference clip.
+    VOICE_MAX_ENROLL_WINDOWS: int = 40
+    # Windows quieter than this RMS are skipped rather than embedded: silence
+    # has a voiceprint too, and it is the same one for everybody.
+    VOICE_MIN_RMS: float = 0.006
+    # Cluster voiceprints come from the diarization turns themselves. Turns
+    # below this duration carry too little phonetic content to embed reliably
+    # (and are exactly the overlapped fragments we would like to attribute, so
+    # they are recorded as skipped rather than silently dropped).
+    VOICE_MIN_TURN_SEC: float = 1.0
+    VOICE_MAX_CLUSTER_WINDOWS: int = 60
+    # Audio file extensions treated as voice references by the registry scan.
+    VOICE_AUDIO_EXTS: ClassVar[tuple] = (
+        ".mp3", ".wav", ".m4a", ".flac", ".ogg", ".opus", ".aac", ".wma")
+
     # Whisper's VAD drops quiet or heavily overlapped speech before decoding,
     # which loses words in exactly the interruptions talk-shows are full of.
     # Set WHISPER_VAD_FILTER=0 to recover them (at the cost of more hallucinated

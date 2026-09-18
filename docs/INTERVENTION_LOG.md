@@ -102,6 +102,38 @@ and points the work at the wrong stage.
 |---|---|---|---|---|---|---|---|---|---|
 | v12 | word-merge fix (per-segment), default decode | 0.8359 | 0.8242 | 0.8359 | — | — | — | 0.6427 / 0.9772 | `kaggle_run.py --id rtv_goll_table_ep_v12` |
 | v13 | word-merge fix (per-segment), default decode | 0.8851 | 0.8777 | 0.8851 | 0.6458 | 0.3825 | 0.0185 | 0.7710 / 0.9678 | `kaggle_run.py --id rtv_goll_table_ep_v13` |
+| v14 | *(run by hand; fill in from `/kaggle/working/output/rtv_goll_table_ep_v14`)* | pending | pending | pending | pending | pending | pending | pending | `kaggle_run.py --id rtv_goll_table_ep_v14` |
+| v15 | voice feature wired in, `VOICE_POLICY=off` — regression check that the fusion refactor is inert | pending | pending | pending | pending | pending | pending | pending | `kaggle_run.py --id rtv_goll_table_ep_v15` |
+| v16 | voiceprints computed, `VOICE_POLICY=fallback`, **default (uncalibrated) gates** — instrument run | pending | pending | pending | pending | pending | pending | pending | `VOICE_POLICY=fallback kaggle_run.py --id rtv_goll_table_ep_v16` |
+| v17 | voice with gates measured by `voice_verify.py` on v16 | pending | pending | pending | pending | pending | pending | pending | `VOICE_POLICY=fallback VOICE_SIM_THRESHOLD=<T> VOICE_SIM_MARGIN=<M> kaggle_run.py --id rtv_goll_table_ep_v17` |
+| v18 | as v17 with `VOICE_POLICY=override` (only if the sweep shows a face/voice conflict) | pending | pending | pending | pending | pending | pending | pending | `VOICE_POLICY=override … --id rtv_goll_table_ep_v18` |
+
+## Voice reference registry (Step 3, first attempt)
+
+A second biometric, parallel to the face photos: `data/registry/<Name>.mp3` is
+embedded with a pyannote speaker-verification model and matched against each
+diarization cluster by cosine. Faces answer *who is on screen*; in an overlap
+the camera frames both speakers, so only a voiceprint can say who is talking.
+
+`VOICE_POLICY` is **off by default** — v15 must reproduce v14 within the
+v12–v13 spread (0.049 coverage-matched) or the refactor, not the feature, is the
+variable. Full procedure: `docs/VOICE_REFERENCE.md`.
+
+Three things decide whether this reads as a result or a null:
+
+1. **`max off-diagonal` in `voice_diagnostics.json`** is the impostor ceiling
+   for this registry. If it approaches the genuine matches, no threshold can
+   separate that pair and the honest finding is a limit, not a tuning problem.
+2. **Cluster coherence** separates a labelling error (fixable here) from a
+   cluster error (Step 2 work, not fixable here).
+3. **The sweep's `wrong` count.** Naming one more cluster correctly while
+   misnaming another is not a gain in a time-weighted metric unless the times
+   are comparable — read the overlapping-subset delta, which is the primary
+   target, not the headline.
+
+Runs v16–v18 each add bounded compute: enrolment is capped at 40 windows per
+reference clip and each cluster at 60, so the stage is a fixed ~500 embedding
+calls regardless of episode length.
 
 ## The noise floor, measured (v12 vs v13)
 
