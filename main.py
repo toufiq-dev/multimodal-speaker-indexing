@@ -148,6 +148,26 @@ def run_pipeline(
           f"across {len(diarization)} turns")
     release_gpu_memory()
 
+    # Enrolled voiceprints (optional). Kept directly after diarization so the
+    # two GPU stages never hold VRAM at the same time. With the default
+    # VOICE_POLICY=off this is a no-op and the pipeline is face-and-text only.
+    print(f"[2b/{TOTAL_STAGES}] Matching enrolled voiceprints...")
+    voice_matches: dict = {}
+    try:
+        from engines.voice import build_voice_evidence
+        evidence = build_voice_evidence(diarization, audio_path)
+        voice_matches = evidence.matches
+        if evidence.available:
+            print(f"    {len(voice_matches)} cluster(s) named by voice")
+        else:
+            print(f"    no voice evidence ({evidence.note or 'none'})")
+        evidence.persist(out_dir)
+        del evidence
+    except Exception as e:
+        print(f"    voice stage failed ({e.__class__.__name__}: {e}); "
+              f"continuing face-only")
+    release_gpu_memory()
+
     print(f"[3/{TOTAL_STAGES}] Transcribing audio...")
     if use_lora:
         if not lora_path:
@@ -179,7 +199,9 @@ def run_pipeline(
     release_gpu_memory()
 
     print(f"[7/{TOTAL_STAGES}] Fusing modalities...")
-    final_segments = run_fusion_pipeline(diarization, transcribed, faces, ordered_names)
+    final_segments = run_fusion_pipeline(
+        diarization, transcribed, faces, ordered_names,
+        voice_matches=voice_matches)
     print(f"    Produced {len(final_segments)} final segments")
 
     # Write outputs
